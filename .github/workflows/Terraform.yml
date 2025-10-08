@@ -16,14 +16,17 @@ jobs:
         working-directory: ./main
 
     steps:
+      # 1️⃣ Checkout the repo
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2️⃣ Setup Terraform
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.0.10
 
+      # 3️⃣ Cache Terraform plugins/modules
       - name: Cache Terraform modules
         uses: actions/cache@v3
         with:
@@ -32,6 +35,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-terraform-
 
+      # 4️⃣ Terraform Init with Azure backend
       - name: Terraform Init
         id: init
         env:
@@ -48,10 +52,12 @@ jobs:
           -backend-config="resource_group_name=$RESOURCE_GROUP" \
           -backend-config="key=terraform.tfstate"
 
+      # 5️⃣ Terraform Validate
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
 
+      # 6️⃣ Terraform Plan for PRs
       - name: Terraform Plan
         id: plan
         if: github.event_name == 'pull_request'
@@ -66,6 +72,7 @@ jobs:
           cat plan.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
+      # 7️⃣ Add Plan Comment on PR
       - name: Add Plan Comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -93,6 +100,7 @@ jobs:
               body: output
             })
 
+      # 8️⃣ Terraform Apply on main branch
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
