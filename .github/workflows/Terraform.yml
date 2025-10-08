@@ -13,10 +13,10 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ./main
+        working-directory: ./  # <-- change if your Terraform files are in a folder
 
     steps:
-      # 1️⃣ Checkout the repo
+      # 1️⃣ Checkout repository
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -35,7 +35,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-terraform-
 
-      # 4️⃣ Terraform Init with Azure backend
+      # 4️⃣ Debug: list files to check path
+      - name: List directory
+        run: ls -R
+
+      # 5️⃣ Terraform Init
       - name: Terraform Init
         id: init
         env:
@@ -46,18 +50,19 @@ jobs:
           RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
           STORAGE_ACCOUNT: ${{ secrets.STORAGE_ACCOUNT }}
           CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
-        run: terraform init \
-          -backend-config="storage_account_name=$STORAGE_ACCOUNT" \
-          -backend-config="container_name=$CONTAINER_NAME" \
-          -backend-config="resource_group_name=$RESOURCE_GROUP" \
-          -backend-config="key=terraform.tfstate"
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=$STORAGE_ACCOUNT" \
+            -backend-config="container_name=$CONTAINER_NAME" \
+            -backend-config="resource_group_name=$RESOURCE_GROUP" \
+            -backend-config="key=terraform.tfstate"
 
-      # 5️⃣ Terraform Validate
+      # 6️⃣ Terraform Validate
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
 
-      # 6️⃣ Terraform Plan for PRs
+      # 7️⃣ Terraform Plan (for PRs only)
       - name: Terraform Plan
         id: plan
         if: github.event_name == 'pull_request'
@@ -67,40 +72,40 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZ_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZ_SUBSCRIPTION_ID }}
         run: |
-          terraform plan -no-color | tee plan.txt
-          echo "stdout<<EOF" >> $GITHUB_OUTPUT
+          terraform plan -no-color -out=tfplan | tee plan.txt
+          echo "plan_output<<EOF" >> $GITHUB_OUTPUT
           cat plan.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      # 7️⃣ Add Plan Comment on PR
+      # 8️⃣ Add Plan Comment to PR
       - name: Add Plan Comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
-        env:
-          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:
           github-token: ${{ secrets.AZ_GIT_TOKEN }}
           script: |
-            const output = `#### Terraform Init ⚙️ \`${{ steps.init.outcome }}\`
-            #### Terraform Validate 🤖 \`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+            const plan = `${{ steps.plan.outputs.plan_output }}`;
+            const commentBody = `
+            #### Terraform Init: \`${{ steps.init.outcome }}\`
+            #### Terraform Validate: \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan: \`${{ steps.plan.outcome }}\`
 
             <details><summary>Show Plan</summary>
-
-            \`\`\`${process.env.PLAN}\`\`\`
-
+            \`\`\`
+            ${plan}
+            \`\`\`
             </details>
 
-            *Pusher: @${{ github.actor }}, Workflow: \`${{ github.workflow }}\`*`;
-            
+            *Triggered by: @${{ github.actor }}, Workflow: \`${{ github.workflow }}\`*`;
+
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
-            })
+              body: commentBody
+            });
 
-      # 8️⃣ Terraform Apply on main branch
+      # 9️⃣ Terraform Apply (only on main branch)
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
