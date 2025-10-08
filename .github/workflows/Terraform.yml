@@ -1,0 +1,103 @@
+name: 'Terraform'
+
+on: [push, pull_request]
+
+env:
+  TF_LOG: INFO
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.0.10
+
+      - name: Cache Terraform modules
+        uses: actions/cache@v3
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf*') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: Terraform Init
+        id: init
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZ_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZ_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZ_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZ_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          STORAGE_ACCOUNT: ${{ secrets.STORAGE_ACCOUNT }}
+          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+        run: terraform init \
+          -backend-config="storage_account_name=$STORAGE_ACCOUNT" \
+          -backend-config="container_name=$CONTAINER_NAME" \
+          -backend-config="resource_group_name=$RESOURCE_GROUP" \
+          -backend-config="key=terraform.tfstate"
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        if: github.event_name == 'pull_request'
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZ_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZ_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZ_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZ_SUBSCRIPTION_ID }}
+        run: |
+          terraform plan -no-color | tee plan.txt
+          echo "stdout<<EOF" >> $GITHUB_OUTPUT
+          cat plan.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Add Plan Comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.AZ_GIT_TOKEN }}
+          script: |
+            const output = `#### Terraform Init ⚙️ \`${{ steps.init.outcome }}\`
+            #### Terraform Validate 🤖 \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`${process.env.PLAN}\`\`\`
+
+            </details>
+
+            *Pusher: @${{ github.actor }}, Workflow: \`${{ github.workflow }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZ_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZ_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZ_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZ_SUBSCRIPTION_ID }}
+        run: terraform apply -auto-approve -input=false
