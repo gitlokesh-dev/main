@@ -262,298 +262,255 @@ function Get-EmbeddedTemplate {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VCLite Citrix Billing Report</title>
+<title>Citrix Session Report v9.0</title>
 <style>
-/* VCLite Citrix Billing Report - Template File */
+/* ===========================================================
+   CITRIX SESSION REPORT  v9.0
+   Brand   : rgb(216,0,116) -- Company Standard
+   Theme   : Light (white / #f4f5f8)
+   Fixes   : Row-number off-by-one &middot; reset clears active class
+             &middot; export key _rn corrected &middot; duration filter logic
+   New     : Min/Max Duration &middot; UserName dropdown &middot; ISP filter
+             &middot; two-row filter bar with section labels
+             &middot; "Skipped" stat card &middot; improved rbar info
+=========================================================== */
 :root{
-  --brand    :rgb(216,0,116);
-  --brand-dk :rgb(175,0,93);
-  --brand-lt :rgba(216,0,116,.10);
-  --brand-xlt:rgba(216,0,116,.05);
-  --brand-bd :rgba(216,0,116,.28);
-  --white    :#fff;
-  --bg       :#f2f4f8;
-  --bg2      :#f9fafb;
-  --border   :#e0e4ea;
-  --border-lt:#edf0f4;
-  --text     :#1a1d23;
-  --text-s   :#4b5563;
-  --text-m   :#9ca3af;
-  --green    :#059669;
-  --amber    :#d97706;
-  --blue     :#2563eb;
-  --red      :#dc2626;
-  --r-even   :#fdf4f9;
-  --r-odd    :#fff;
-  --r-hover  :rgba(216,0,116,.06);
-  --sh-hdr   :0 2px 12px rgba(216,0,116,.22),0 1px 4px rgba(0,0,0,.12);
-  --sh-card  :0 1px 4px rgba(0,0,0,.07);
-  --sh-tbl   :0 2px 12px rgba(0,0,0,.10);
-  --rad      :8px;
-  --rsm      :5px;
+  --brand       :rgb(216,0,116);
+  --brand-dk    :rgb(175,0,93);
+  --brand-lt    :rgba(216,0,116,.10);
+  --brand-xlt   :rgba(216,0,116,.05);
+  --brand-glow  :rgba(216,0,116,.20);
+  --brand-border:rgba(216,0,116,.28);
+  --white       :#ffffff;
+  --bg          :#f4f5f8;
+  --bg2         :#f9fafb;
+  --border      :#e0e4ea;
+  --border-lt   :#edf0f4;
+  --text        :#1a1d23;
+  --text-sub    :#4b5563;
+  --text-muted  :#9ca3af;
+  --green       :#059669;
+  --amber       :#d97706;
+  --blue        :#2563eb;
+  --red         :#dc2626;
+  --row-even    :#fdf4f9;
+  --row-odd     :#ffffff;
+  --row-hover   :rgba(216,0,116,.06);
+  --sh-hdr      :0 2px 10px rgba(216,0,116,.18),0 1px 3px rgba(0,0,0,.10);
+  --sh-card     :0 1px 4px rgba(0,0,0,.07);
+  --sh-tbl      :0 2px 10px rgba(0,0,0,.09);
+  --radius      :8px;
+  --rsm         :5px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden}
+html,body{height:100%}
 body{font-family:Arial,Helvetica,sans-serif;font-size:13px;
-     background:var(--bg);color:var(--text);
-     display:flex;flex-direction:column}
+  background:var(--bg);color:var(--text);
+  display:flex;flex-direction:column;overflow:hidden}
 
-/* ------ HEADER --------------------------------------------------------------------------------------------------------------------------------------------- */
-.page-hdr{
-  background:var(--brand);color:#fff;
-  box-shadow:var(--sh-hdr);
-  flex-shrink:0;position:relative;overflow:hidden;
-}
-.page-hdr::before{
-  content:'';position:absolute;inset:0;
-  background:repeating-linear-gradient(-45deg,
-    rgba(255,255,255,0) 0,rgba(255,255,255,0) 18px,
-    rgba(255,255,255,.03) 18px,rgba(255,255,255,.03) 20px);
-}
-.page-hdr::after{
-  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,rgba(255,255,255,.5),
-    transparent 50%,rgba(255,255,255,.5));
-}
-.hdr-top{
-  position:relative;z-index:1;
-  display:flex;align-items:center;justify-content:space-between;
-  padding:13px 24px 11px;gap:16px;flex-wrap:wrap;
-}
-.hdr-brand{display:flex;align-items:center;gap:10px}
-.hdr-icon{
-  width:32px;height:32px;background:rgba(255,255,255,.16);
-  border-radius:7px;border:1px solid rgba(255,255,255,.28);
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-}
-.hdr-title{font-size:16px;font-weight:800;letter-spacing:-.2px;line-height:1.2}
-.hdr-sub  {font-size:10.5px;color:rgba(255,255,255,.72);margin-top:1px}
-.hdr-ver  {
-  font-size:9.5px;font-weight:700;background:rgba(255,255,255,.18);
-  color:#fff;padding:2px 8px;border-radius:9px;
-  border:1px solid rgba(255,255,255,.30);white-space:nowrap;
-}
-.hdr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.hdr-strip{
-  position:relative;z-index:1;
-  display:flex;align-items:center;justify-content:space-between;
-  background:rgba(0,0,0,.20);padding:7px 26px;
-  font-size:10.5px;color:rgba(255,255,255,.85);
-  gap:12px;flex-wrap:wrap;
-}
-.hdr-strip-left{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
-.hdr-strip-left span{display:flex;align-items:center;gap:5px}
-.hdr-strip-left strong{color:#fff}
-.status-pill{
-  padding:3px 14px;border-radius:20px;font-weight:800;
-  font-size:10px;letter-spacing:.4px;white-space:nowrap;
-}
-.p-ok  {background:rgba(10,122,9,.88); color:#fff}
-.p-warn{background:rgba(176,94,0,.88); color:#fff}
-.p-info{background:rgba(37,99,235,.88);color:#fff}
+/* == Setup Banner ======================================== */
+#setupBanner{background:#fff8f0;border-bottom:3px solid #f59e0b;
+  padding:14px 22px;display:none}
+#setupBanner.show{display:block}
+.sb-title{color:#92400e;font-size:13px;font-weight:700;
+  margin-bottom:9px;display:flex;align-items:center;gap:7px}
+.sb-steps{display:flex;flex-wrap:wrap;gap:6px}
+.sb-step{display:flex;align-items:flex-start;gap:8px;flex:1;min-width:200px;
+  background:#fffbf5;border:1px solid #fde68a;border-radius:6px;padding:8px 11px}
+.sb-num{background:var(--brand);color:#fff;border-radius:50%;
+  width:18px;height:18px;display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:700;flex-shrink:0;margin-top:1px}
+.sb-step p{font-size:11.5px;color:#78350f;line-height:1.5}
+.sb-step code{background:rgba(0,0,0,.07);border-radius:3px;padding:1px 5px;
+  font-family:'Courier New',monospace;font-size:10.5px;color:#7c3aed}
 
-/* ------ BUTTONS --------------------------------------------------------------------------------------------------------------------------------------------- */
-.btn{
-  display:inline-flex;align-items:center;gap:5px;
-  padding:0 13px;height:30px;border:none;border-radius:var(--rsm);
-  font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;
-  font-family:inherit;transition:filter .12s,transform .09s;
-  position:relative;
-}
-.btn:hover  {filter:brightness(1.10);transform:translateY(-1px)}
-.btn:active {transform:none;filter:brightness(.92)}
+/* == Header ============================================== */
+.hdr{background:var(--brand);color:#fff;padding:0 20px;height:50px;
+  display:flex;align-items:center;justify-content:space-between;
+  box-shadow:var(--sh-hdr);position:sticky;top:0;z-index:600;flex-shrink:0}
+.hdr-left{display:flex;align-items:center;gap:9px}
+.hdr-icon{width:28px;height:28px;background:rgba(255,255,255,.16);
+  border-radius:6px;border:1px solid rgba(255,255,255,.26);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.hdr-title{font-size:15px;font-weight:700;letter-spacing:-.1px}
+.hdr-ver{font-size:10px;font-weight:600;background:rgba(255,255,255,.17);
+  color:#fff;padding:2px 7px;border-radius:9px;margin-left:4px;
+  border:1px solid rgba(255,255,255,.28)}
+.hdr-meta{font-size:10px;color:rgba(255,255,255,.72);margin-left:6px}
+.hdr-right{display:flex;align-items:center;gap:7px}
+
+/* == Buttons ============================================= */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:28px;
+  border:none;border-radius:var(--rsm);font-size:11px;font-weight:700;
+  cursor:pointer;transition:filter .12s,transform .09s;
+  white-space:nowrap;font-family:inherit;position:relative}
+.btn:hover{filter:brightness(1.10);transform:translateY(-1px)}
+.btn:active{transform:none;filter:brightness(.92)}
 .btn:disabled{opacity:.35;cursor:not-allowed;transform:none;filter:none}
-.btn-csv  {background:#fff;color:var(--brand);
-           border:1.5px solid rgba(255,255,255,.55);
-           box-shadow:0 1px 4px rgba(0,0,0,.15)}
+.btn-csv {background:#fff;color:var(--brand);
+  border:1.5px solid rgba(255,255,255,.55);box-shadow:0 1px 4px rgba(0,0,0,.13)}
+.btn-xlsx{background:rgba(255,255,255,.14);color:#fff;
+  border:1.5px solid rgba(255,255,255,.32)}
 .btn-apply{background:var(--brand);color:#fff;
-           box-shadow:0 1px 6px rgba(216,0,116,.35)}
+  box-shadow:0 1px 6px var(--brand-glow)}
 .btn-apply:hover{background:var(--brand-dk)}
-.btn-ghost{background:rgba(255,255,255,.13);color:#fff;
-           border:1.5px solid rgba(255,255,255,.32)}
-.btn-reset{background:var(--white);color:var(--text-s);
-           border:1px solid var(--border)}
+.btn-reset{background:var(--white);color:var(--text-sub);
+  border:1px solid var(--border)}
 .btn-reset:hover{border-color:var(--brand);color:var(--brand)}
-.fbadge{
-  display:none;position:absolute;top:-6px;right:-6px;
+.fbadge{display:none;position:absolute;top:-6px;right:-6px;
   background:var(--amber);color:#fff;border-radius:7px;
-  font-size:8px;font-weight:800;padding:1px 4px;
-  line-height:13px;border:1.5px solid #fff;
-}
+  font-size:8.5px;font-weight:800;padding:1px 4px;line-height:13px;
+  border:1.5px solid #fff}
 .fbadge.on{display:block}
 
-/* ------ STAT CARDS ------------------------------------------------------------------------------------------------------------------------------------ */
-.stats-strip{
-  background:var(--white);border-bottom:1px solid var(--border);
-  padding:8px 22px;display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0;
-}
-.sc{
-  flex:1;min-width:90px;background:var(--bg2);
+/* == Stat Cards ========================================== */
+.stats-strip{background:var(--white);border-bottom:1px solid var(--border);
+  padding:8px 20px;display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0}
+.stat-card{flex:1;min-width:95px;background:var(--bg2);
   border:1px solid var(--border);border-top:3px solid var(--brand);
-  border-radius:var(--rad);padding:8px 12px;
-  box-shadow:var(--sh-card);text-align:center;
-  transition:box-shadow .15s,transform .15s;
-}
-.sc:hover{box-shadow:0 3px 12px rgba(216,0,116,.16);transform:translateY(-1px)}
-.sc .val{
-  font-size:19px;font-weight:800;color:var(--brand);
-  line-height:1.1;font-family:'Courier New',monospace;
-}
-.sc .lbl{
-  font-size:8px;color:var(--text-m);text-transform:uppercase;
-  letter-spacing:.7px;margin-top:3px;font-weight:700;
-}
-.sc.skip{border-top-color:var(--amber)}
-.sc.skip .val{color:var(--amber)}
+  border-radius:var(--radius);padding:8px 12px;
+  box-shadow:var(--sh-card);text-align:center;transition:box-shadow .15s}
+.stat-card:hover{box-shadow:0 3px 10px rgba(216,0,116,.14)}
+.stat-card .val{font-size:20px;font-weight:700;color:var(--brand);line-height:1.1;
+  font-family:'Courier New',Courier,monospace}
+.stat-card .lbl{font-size:8.5px;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.7px;margin-top:3px;font-weight:600}
+.stat-card.skipped .val{color:var(--amber)}
+.stat-card.skipped{border-top-color:var(--amber)}
 
-/* ------ FILTER BAR ------------------------------------------------------------------------------------------------------------------------------------ */
-.fbar{
-  background:var(--white);border-bottom:2px solid var(--border);
-  padding:8px 22px;display:flex;flex-direction:column;gap:7px;
-  position:sticky;top:0;z-index:500;flex-shrink:0;
-}
+/* == Filter Bar -- 2 rows ================================= */
+.fbar{background:var(--white);border-bottom:2px solid var(--border);
+  padding:8px 20px;display:flex;flex-direction:column;gap:6px;
+  position:sticky;top:50px;z-index:500;flex-shrink:0}
 .frow{display:flex;flex-wrap:wrap;gap:7px;align-items:flex-end}
-.f-sec-lbl{
-  font-size:8.5px;font-weight:800;color:var(--brand);
-  text-transform:uppercase;letter-spacing:.5px;
-  border-left:2.5px solid var(--brand);padding-left:6px;
-  align-self:center;white-space:nowrap;margin-right:2px;
-}
+.frow-label{font-size:9px;font-weight:700;color:var(--brand);
+  text-transform:uppercase;letter-spacing:.5px;align-self:center;
+  padding:0 4px 0 2px;white-space:nowrap;border-left:2px solid var(--brand);
+  padding-left:6px;margin-right:2px}
 .fg{display:flex;flex-direction:column;gap:3px}
-.fg label{
-  font-size:8.5px;font-weight:700;color:var(--text-m);
-  text-transform:uppercase;letter-spacing:.5px;
-}
-.fg input,.fg select{
-  height:28px;padding:0 8px;
+.fg label{font-size:9px;font-weight:700;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.55px}
+.fg input,.fg select{height:27px;padding:0 7px;
   border:1px solid var(--border);border-radius:var(--rsm);
-  font-size:11.5px;font-family:inherit;
+  font-size:11.5px;font-family:Arial,Helvetica,sans-serif;
   background:var(--white);color:var(--text);outline:none;
-  transition:border-color .12s,box-shadow .12s;
-}
+  transition:border-color .12s,box-shadow .12s}
 .fg input:focus,.fg select:focus{
-  border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-lt);
-}
-.fg input.act,.fg select.act{
+  border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-lt)}
+.fg input.active,.fg select.active{
   border-color:var(--brand);background:var(--brand-xlt);
-  font-weight:700;color:var(--brand);
-}
-.fw{min-width:175px}.fm{min-width:120px}.fd{min-width:136px}.fn{min-width:88px}
-.vsep{width:1px;background:var(--border);height:28px;align-self:flex-end;margin:0 2px}
-.f-chip{
-  display:none;align-items:center;gap:4px;align-self:flex-end;
-  background:var(--brand-lt);border:1px solid var(--brand-bd);
-  border-radius:12px;padding:2px 10px;font-size:10px;
-  font-weight:700;color:var(--brand);white-space:nowrap;height:28px;
-}
-.f-chip.on{display:flex}
-.f-note{
-  display:flex;align-items:center;gap:4px;align-self:flex-end;
+  font-weight:700;color:var(--brand)}
+.fg-wide{min-width:170px}
+.fg-med {min-width:115px}
+.fg-sm  {min-width:80px}
+.fg-dur {min-width:88px}
+
+/* filter chip & notice */
+#filterChip{display:none;align-items:center;gap:4px;align-self:flex-end;
+  background:var(--brand-lt);border:1px solid var(--brand-border);
+  border-radius:12px;padding:2px 9px;font-size:10.5px;font-weight:700;
+  color:var(--brand);white-space:nowrap;height:27px}
+#filterChip.on{display:flex}
+.date-note{display:none;align-items:center;gap:4px;align-self:flex-end;
   background:#fff8e1;border:1px solid #fbbf24;border-radius:12px;
-  padding:2px 10px;font-size:9.5px;font-weight:600;
-  color:#92400e;white-space:nowrap;height:28px;
-}
-.f-act{display:flex;gap:6px;align-self:flex-end}
+  padding:2px 9px;font-size:10px;font-weight:600;
+  color:#92400e;white-space:nowrap;height:27px}
+.date-note.on{display:flex}
+.fg-act{display:flex;gap:6px;align-self:flex-end}
+.frow-sep{width:1px;background:var(--border);height:27px;align-self:flex-end;margin:0 2px}
 
-/* ------ RESULT BAR ------------------------------------------------------------------------------------------------------------------------------------ */
-.rbar{
-  display:flex;align-items:center;justify-content:space-between;
-  flex-wrap:wrap;gap:7px;padding:4px 22px;
-  font-size:11.5px;color:var(--text-s);
-  background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;
-}
-.rbar-l{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.prog{display:none;align-items:center;gap:7px;font-size:11px;color:var(--brand);font-weight:700}
-.prog-track{width:140px;height:4px;background:var(--brand-lt);border-radius:3px;overflow:hidden}
-.prog-fill {height:100%;width:0%;background:var(--brand);border-radius:3px;transition:width .2s}
+/* == Result Bar ========================================== */
+.rbar{display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:7px;padding:4px 20px;font-size:11.5px;
+  color:var(--text-sub);background:var(--bg2);
+  border-bottom:1px solid var(--border);flex-shrink:0}
+.rbar-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.prog{display:none;align-items:center;gap:7px;font-size:11px;
+  color:var(--brand);font-weight:700}
+.prog-track{width:130px;height:4px;background:var(--brand-lt);
+  border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;width:0%;background:var(--brand);
+  border-radius:3px;transition:width .2s}
 
-/* ------ VIRTUAL SCROLL TABLE ------------------------------------------------------------------------------------------------------ */
-.t-outer{flex:1;overflow:hidden;padding:8px 22px 6px;display:flex;flex-direction:column;min-height:0}
-.vwrap{
-  flex:1;min-height:0;overflow-x:auto;overflow-y:auto;
-  border:1px solid var(--border);border-radius:var(--rad);
-  box-shadow:var(--sh-tbl);background:var(--white);
-}
-.vshead{position:sticky;top:0;z-index:10}
-.vshead table{width:100%;border-collapse:collapse;min-width:2800px}
-th{
-  background:var(--brand);color:#fff;
-  padding:8px 10px;text-align:left;white-space:nowrap;
-  font-weight:700;font-size:10.5px;letter-spacing:.2px;
-  border-right:1px solid rgba(255,255,255,.13);
-  border-bottom:2px solid rgba(0,0,0,.13);
-  cursor:pointer;user-select:none;
-}
+/* == Table =============================================== */
+.t-outer{flex:1;overflow:hidden;padding:8px 20px 8px;
+  display:flex;flex-direction:column}
+.vscroll-wrap{flex:1;position:relative;overflow-x:auto;overflow-y:auto;
+  border:1px solid var(--border);border-radius:var(--radius);
+  box-shadow:var(--sh-tbl);background:var(--white)}
+.vscroll-head{position:sticky;top:0;z-index:10}
+.vscroll-head table{width:100%;border-collapse:collapse;min-width:2750px}
+th{background:rgb(216,0,116);color:#fff;padding:8px 10px;text-align:left;
+  white-space:nowrap;font-weight:700;font-size:10.5px;letter-spacing:.25px;
+  border-right:1px solid rgba(255,255,255,.14);
+  border-bottom:2px solid rgba(0,0,0,.12);
+  user-select:none;cursor:pointer}
 th:last-child{border-right:none}
-th:hover{background:var(--brand-dk)}
-th.sa::after{content:" ^";font-size:8px;opacity:.85}
-th.sd::after{content:" v";font-size:8px;opacity:.85}
-th.ns{cursor:default}
-.vsbody{min-width:2800px;position:relative;background:var(--white)}
+th:hover{background:rgb(175,0,93)}
+th.sort-asc::after {content:" ^";font-size:8.5px;opacity:.85}
+th.sort-desc::after{content:" v";font-size:8.5px;opacity:.85}
+th.no-sort{cursor:default}
+.vscroll-body{min-width:2750px;background:var(--white)}
 .vrow{display:flex;transition:background .06s}
-.vrow:hover .vc{background:var(--r-hover)!important}
-.vc{
-  flex-shrink:0;padding:4px 10px;
+.vrow:hover .vcell{background:var(--row-hover)!important}
+.vcell{flex-shrink:0;padding:4px 10px;
   border-bottom:1px solid var(--border-lt);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  font-size:11.5px;display:flex;align-items:center;
-}
-.vrow.ev .vc{background:var(--r-even)}
-.vrow.od .vc{background:var(--r-odd)}
-.vc.num  {color:var(--text-m);font-size:10px;font-family:'Courier New',monospace;justify-content:flex-end}
-.vc.dur  {font-family:'Courier New',monospace;font-size:11px;color:var(--green);font-weight:700}
-.vc.mono {font-family:'Courier New',monospace;font-size:11px;color:var(--blue)}
-.vc.bold {font-weight:700}
-.vc.mu   {color:var(--text-m);font-size:11px}
-.no-rows {text-align:center;padding:60px 20px;color:var(--text-m);font-size:13px}
-.bdg{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:700}
-.bw{background:#dbeafe;color:#1d4ed8}.bm{background:#fce7f3;color:#9d174d}
-.bl{background:#d1fae5;color:#065f46}.bi{background:#ede9fe;color:#5b21b6}
-.ba{background:#fef3c7;color:#92400e}.bo{background:#f3f4f6;color:#374151}
-.bh{background:#d1fae5;color:#065f46}.br{background:#dbeafe;color:#1d4ed8}
-.bp{background:#f3f4f6;color:#374151}
+  font-size:11.5px;display:flex;align-items:center}
+.vrow.even .vcell{background:var(--row-even)}
+.vrow.odd  .vcell{background:var(--row-odd)}
+.vcell.num  {color:var(--text-muted);font-size:10px;
+  font-family:'Courier New',monospace;justify-content:flex-end}
+.vcell.dur  {font-family:'Courier New',monospace;font-size:11px;
+  color:var(--green);font-weight:700}
+.vcell.mono {font-family:'Courier New',monospace;font-size:11px;color:var(--blue)}
+.vcell.bold {font-weight:700;color:var(--text)}
+.vcell.muted{color:var(--text-muted);font-size:11px}
+.no-rows{text-align:center;padding:60px 20px;color:var(--text-muted);font-size:13px}
+.no-rows svg{display:block;margin:0 auto 12px;opacity:.3}
 
-/* ------ PAGER --------------------------------------------------------------------------------------------------------------------------------------------------- */
-.pgr{
-  display:flex;align-items:center;flex-wrap:wrap;gap:5px;
-  padding:6px 22px;background:var(--white);
-  border-top:1px solid var(--border);font-size:11.5px;flex-shrink:0;
-}
-.pgr-info{color:var(--text-s)}
-.pgr select,.pgr button{
-  font-family:inherit;font-size:11px;
+/* == Badges ============================================== */
+.bdg{display:inline-block;padding:1px 7px;border-radius:9px;
+  font-size:10px;font-weight:700;letter-spacing:.1px}
+.b-win{background:#dbeafe;color:#1d4ed8}
+.b-mac{background:#fce7f3;color:#9d174d}
+.b-lnx{background:#d1fae5;color:#065f46}
+.b-ios{background:#ede9fe;color:#5b21b6}
+.b-adr{background:#fef3c7;color:#92400e}
+.b-oth{background:#f3f4f6;color:#374151}
+.b-hdx{background:#d1fae5;color:#065f46}
+.b-rdp{background:#dbeafe;color:#1d4ed8}
+.b-prt{background:#f3f4f6;color:#374151}
+
+/* == Pager =============================================== */
+.pgr{display:flex;align-items:center;flex-wrap:wrap;gap:5px;
+  padding:6px 20px;background:var(--white);
+  border-top:1px solid var(--border);font-size:11.5px;flex-shrink:0}
+.pgr-info{color:var(--text-sub)}
+.pgr select,.pgr button{font-family:inherit;font-size:11px;
   border:1px solid var(--border);border-radius:var(--rsm);
-  background:var(--white);color:var(--text);
-  cursor:pointer;transition:all .1s;
-}
+  background:var(--white);color:var(--text);cursor:pointer;
+  transition:all .1s}
 .pgr select{padding:3px 6px}
 .pgr button{padding:2px 10px}
 .pgr button:hover:not(.pga):not(:disabled){
-  background:var(--brand-lt);border-color:var(--brand-bd);color:var(--brand);
-}
+  background:var(--brand-lt);border-color:var(--brand-border);color:var(--brand)}
 .pgr button.pga{background:var(--brand);color:#fff;border-color:var(--brand)}
 .pgr button:disabled{opacity:.28;cursor:not-allowed}
 
-/* ------ FOOTER ------------------------------------------------------------------------------------------------------------------------------------------------ */
-.page-ftr{
-  background:var(--white);border-top:1px solid var(--border);
-  padding:6px 24px;display:flex;align-items:center;
-  justify-content:space-between;flex-wrap:wrap;gap:8px;
-  font-size:10px;color:var(--text-m);flex-shrink:0;
-}
-.ftr-brand{display:flex;align-items:center;gap:7px;font-weight:700;color:var(--text-s)}
-.ftr-brand span{color:var(--brand)}
-.ftr-meta{font-size:9.5px;text-align:right;line-height:1.6}
+/* == Footer ============================================== */
+.footer{text-align:center;padding:5px;font-size:10px;
+  color:var(--text-muted);border-top:1px solid var(--border);
+  background:var(--white);flex-shrink:0;line-height:1.7}
+.footer strong{color:var(--text-sub)}
 
-/* ------ TOAST --------------------------------------------------------------------------------------------------------------------------------------------------- */
-.toast{
-  position:fixed;bottom:18px;right:18px;background:#1f2937;color:#fff;
-  padding:9px 16px;border-radius:8px;font-size:12px;font-weight:600;
-  box-shadow:0 4px 16px rgba(0,0,0,.30);z-index:9999;
+/* == Toast =============================================== */
+.toast{position:fixed;bottom:18px;right:18px;background:#1f2937;color:#fff;
+  padding:8px 15px;border-radius:8px;font-size:12px;font-weight:600;
+  box-shadow:0 4px 14px rgba(0,0,0,.28);z-index:9999;
   border-left:3px solid var(--brand);
   opacity:0;transform:translateY(8px);
-  transition:opacity .23s,transform .23s;pointer-events:none;
-}
+  transition:opacity .23s,transform .23s;pointer-events:none}
 .toast.on{opacity:1;transform:translateY(0)}
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-track{background:#f0f0f0}
@@ -563,127 +520,186 @@ th.ns{cursor:default}
 </head>
 <body>
 
-<!-- DATA blocks --- PS1 replaces placeholder tokens at runtime -->
+<!-- DATA blocks -- PS1 replaces placeholder tokens -->
 <script type="application/json" id="citrix-data">CITRIX_DATA_PLACEHOLDER_JSON_ARRAY</script>
 <script type="application/json" id="citrix-meta">CITRIX_META_PLACEHOLDER_JSON_OBJECT</script>
 
-<!-- ---------------------------------------------------------------------  HEADER  ------------------------------------------------------------------------------------------ -->
-<header class="page-hdr">
-  <div class="hdr-top">
-    <div class="hdr-brand">
-      <div class="hdr-icon">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2">
-          <rect x="2" y="3" width="20" height="14" rx="2"/>
-          <path d="M8 21h8M12 17v4"/>
-        </svg>
-      </div>
-      <div>
-        <div class="hdr-title">VCLite Citrix Billing Report</div>
-        <div class="hdr-sub" id="hdrSub">Loading data...</div>
-      </div>
-      
-    </div>
-    <div class="hdr-actions">
-      <button class="btn btn-csv" id="btnCSV" onclick="doCSV()" disabled title="Download filtered data as CSV">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-        </svg>
-        Download CSV
-        <span class="fbadge" id="csvBadge">F</span>
-      </button>
-    </div>
+<!-- Setup banner (visible only when template is raw) -->
+<div id="setupBanner">
+  <div class="sb-title">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    Raw template -- not yet populated with live data
   </div>
-  <div class="hdr-strip">
-    <div class="hdr-strip-left">
-      <span>&#128197; Range: <strong id="hMeta-range">---</strong></span>
-      <span>&#128336; Generated: <strong id="hMeta-gen">---</strong></span>
-      <span>&#9989; Valid: <strong id="hMeta-rows">---</strong></span>
-      <span>&#9888; Skipped: <strong id="hMeta-skip">---</strong></span>
+  <div class="sb-steps">
+    <div class="sb-step"><div class="sb-num">1</div>
+      <p>Place this file in same folder as <code>CitrixSessionReport_v9.ps1</code></p></div>
+    <div class="sb-step"><div class="sb-num">2</div>
+      <p>Fill in <code>$CustomerId</code>, <code>$ClientId</code>, <code>$ClientSecretBase64</code> &amp; date range</p></div>
+    <div class="sb-step"><div class="sb-num">3</div>
+      <p>Run: <code>powershell -ExecutionPolicy Bypass -File CitrixSessionReport_v9.ps1</code></p></div>
+    <div class="sb-step"><div class="sb-num">4</div>
+      <p>Open <strong>output</strong> file from <code>%USERPROFILE%\Desktop\CitrixReports\</code></p></div>
+  </div>
+</div>
+
+<!-- Header -->
+<header class="hdr">
+  <div class="hdr-left">
+    <div class="hdr-icon">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2">
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <path d="M8 21h8M12 17v4"/>
+      </svg>
     </div>
-    <span class="status-pill p-info" id="statusPill">Initialising</span>
+    <span class="hdr-title">Citrix Session Report</span>
+    <span class="hdr-ver">v9.0</span>
+    <span class="hdr-meta" id="hdrMeta"></span>
+  </div>
+  <div class="hdr-right">
+    <button class="btn btn-csv" id="btnCSV" onclick="doCSV()" title="Download CSV (respects active filters)">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>v CSV<span class="fbadge" id="csvBadge">F</span>
+    </button>
+    <button class="btn btn-xlsx" id="btnExcel" onclick="doExcel()" title="Download Excel (respects active filters)">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>v Excel<span class="fbadge" id="excelBadge">F</span>
+    </button>
   </div>
 </header>
 
-<!-- ---------------------------------------------------------------------  STAT CARDS  ------------------------------------------------------------------------------ -->
+<!-- Stat cards -->
 <div class="stats-strip">
-  <div class="sc"><div class="val" id="sc-tot">--</div><div class="lbl">Total Sessions</div></div>
-  <div class="sc"><div class="val" id="sc-usr">--</div><div class="lbl">Unique Users</div></div>
-  <div class="sc"><div class="val" id="sc-mac">--</div><div class="lbl">Machines</div></div>
-  <div class="sc"><div class="val" id="sc-ctr">--</div><div class="lbl">Countries</div></div>
-  <div class="sc"><div class="val" id="sc-plt">--</div><div class="lbl">Platforms</div></div>
-  <div class="sc"><div class="val" id="sc-cat">--</div><div class="lbl">Catalogs</div></div>
-  <div class="sc"><div class="val" id="sc-avg">--</div><div class="lbl">Avg Duration</div></div>
-  <div class="sc skip"><div class="val" id="sc-skp">0</div><div class="lbl">Skipped</div></div>
+  <div class="stat-card"><div class="val" id="sc-total">--</div><div class="lbl">Total Sessions</div></div>
+  <div class="stat-card"><div class="val" id="sc-users">--</div><div class="lbl">Unique Users</div></div>
+  <div class="stat-card"><div class="val" id="sc-mach">--</div><div class="lbl">Machines</div></div>
+  <div class="stat-card"><div class="val" id="sc-ctry">--</div><div class="lbl">Countries</div></div>
+  <div class="stat-card"><div class="val" id="sc-plat">--</div><div class="lbl">Platforms</div></div>
+  <div class="stat-card"><div class="val" id="sc-cat">--</div><div class="lbl">Catalogs</div></div>
+  <div class="stat-card"><div class="val" id="sc-avgd">--</div><div class="lbl">Avg Duration</div></div>
+  <div class="stat-card skipped"><div class="val" id="sc-skip">0</div><div class="lbl">Skipped</div></div>
 </div>
 
-<!-- ---------------------------------------------------------------------  FILTER BAR  ------------------------------------------------------------------------------ -->
+<!-- Filter bar -- Row 1: Text + Dropdowns -->
 <div class="fbar">
-  <!-- Row 1: Date range filter -->
   <div class="frow">
-    <span class="f-sec-lbl">&#128197; Date Range Filter</span>
-    <div class="fg fd">
-      <label>From Date</label>
-      <input type="date" id="fDf" onchange="debounce()">
-    </div>
-    <div class="fg fd">
-      <label>To Date</label>
-      <input type="date" id="fDt" onchange="debounce()">
-    </div>
-    <button class="btn btn-apply" onclick="applyFilters()" style="align-self:flex-end">Apply</button>
-    <button class="btn btn-reset" onclick="resetFilters()" style="align-self:flex-end">Reset All</button>
-    <div class="f-chip" id="fChip">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
-      </svg>
-      <span id="fChipTxt">0 filters</span>
-    </div>
-    <div class="f-note">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-      </svg>
-      Today &amp; zero-duration sessions excluded automatically
-    </div>
-  </div>
-  <!-- Row 2: Search and field filters -->
-  <div class="frow">
-    <span class="f-sec-lbl">Search &amp; Filter</span>
-    <div class="fg fw">
+    <span class="frow-label">Search &amp; Filter</span>
+
+    <div class="fg fg-wide">
       <label>Search</label>
       <input type="text" id="fSrch" placeholder="User / Machine / IP / ISP..." oninput="debounce()">
     </div>
-    <div class="fg fm"><label>User</label>
-      <select id="fUN" onchange="applyFilters()"><option value="">All Users</option></select></div>
-    <div class="fg fm"><label>Country</label>
-      <select id="fCo" onchange="applyFilters()"><option value="">All Countries</option></select></div>
-    <div class="fg fm"><label>City</label>
-      <select id="fCi" onchange="applyFilters()"><option value="">All Cities</option></select></div>
-    <div class="fg fm"><label>ISP</label>
-      <select id="fIS" onchange="applyFilters()"><option value="">All ISPs</option></select></div>
-    <div class="fg fm"><label>Platform</label>
-      <select id="fPl" onchange="applyFilters()"><option value="">All Platforms</option></select></div>
-    <div class="fg fm"><label>OS</label>
-      <select id="fOS" onchange="applyFilters()"><option value="">All OS</option></select></div>
-    <div class="fg fm"><label>Catalog</label>
-      <select id="fCa" onchange="applyFilters()"><option value="">All Catalogs</option></select></div>
-    <div class="fg fm"><label>Desktop Group</label>
-      <select id="fDG" onchange="applyFilters()"><option value="">All Groups</option></select></div>
-    <div class="fg fm"><label>Protocol</label>
-      <select id="fPr" onchange="applyFilters()"><option value="">All Protocols</option></select></div>
-    <div class="vsep"></div>
-    <div class="fg fn"><label>Min Dur (s)</label>
-      <input type="number" id="fDurMin" min="0" placeholder="secs" oninput="debounce()"></div>
-    <div class="fg fn"><label>Max Dur (s)</label>
-      <input type="number" id="fDurMax" min="0" placeholder="secs" oninput="debounce()"></div>
+
+    <div class="fg fg-med">
+      <label>User Name</label>
+      <select id="fUN" onchange="applyFilters()"><option value="">All Users</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>Country</label>
+      <select id="fCo" onchange="applyFilters()"><option value="">All Countries</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>City</label>
+      <select id="fCi" onchange="applyFilters()"><option value="">All Cities</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>ISP</label>
+      <select id="fIS" onchange="applyFilters()"><option value="">All ISPs</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>Platform</label>
+      <select id="fPl" onchange="applyFilters()"><option value="">All Platforms</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>OS Type</label>
+      <select id="fOS" onchange="applyFilters()"><option value="">All OS</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>Catalog</label>
+      <select id="fCa" onchange="applyFilters()"><option value="">All Catalogs</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>Desktop Group</label>
+      <select id="fDG" onchange="applyFilters()"><option value="">All Groups</option></select>
+    </div>
+
+    <div class="fg fg-med">
+      <label>Protocol</label>
+      <select id="fPr" onchange="applyFilters()"><option value="">All Protocols</option></select>
+    </div>
+  </div>
+
+  <!-- Row 2: Date range + Duration range + actions -->
+  <div class="frow">
+    <span class="frow-label">Date &amp; Duration</span>
+
+    <div class="fg fg-med">
+      <label>Date From</label>
+      <input type="date" id="fDf" onchange="applyFilters()">
+    </div>
+
+    <div class="fg fg-med">
+      <label>Date To</label>
+      <input type="date" id="fDt" onchange="applyFilters()">
+    </div>
+
+    <div class="frow-sep"></div>
+
+    <div class="fg fg-dur">
+      <label>Min Duration</label>
+      <input type="number" id="fDurMin" min="0" placeholder="secs" title="Minimum session duration in seconds" oninput="debounce()">
+    </div>
+
+    <div class="fg fg-dur">
+      <label>Max Duration</label>
+      <input type="number" id="fDurMax" min="0" placeholder="secs" title="Maximum session duration in seconds" oninput="debounce()">
+    </div>
+
+    <div class="frow-sep"></div>
+
+    <!-- Active filter count chip -->
+    <div id="filterChip">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+      </svg>
+      <span id="filterChipTxt">0 filters</span>
+    </div>
+
+    <!-- Today / zero-duration exclusion notice -->
+    <div class="date-note" id="dateNote">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      Today &amp; zero-duration sessions excluded
+    </div>
+
+    <div class="fg-act">
+      <button class="btn btn-apply" onclick="applyFilters()">Apply</button>
+      <button class="btn btn-reset" onclick="resetFilters()">Reset All</button>
+    </div>
   </div>
 </div>
 
-<!-- ---------------------------------------------------------------------  RESULT BAR  ------------------------------------------------------------------------------ -->
+<!-- Result / progress bar -->
 <div class="rbar">
-  <div class="rbar-l">
+  <div class="rbar-left">
     <span id="rbarTxt">Loading...</span>
-    <span id="rbarSkip" style="color:var(--amber);display:none"></span>
+    <span id="rbarSkip" style="color:var(--amber);font-size:11px;display:none"></span>
   </div>
   <div class="prog" id="progArea">
     <span id="progTxt"></span>
@@ -691,15 +707,15 @@ th.ns{cursor:default}
   </div>
 </div>
 
-<!-- ---------------------------------------------------------------------  TABLE  --------------------------------------------------------------------------------------------- -->
+<!-- Virtual scroll table -->
 <div class="t-outer">
-  <div class="vwrap" id="vWrap">
-    <div class="vshead">
+  <div class="vscroll-wrap" id="vWrap">
+    <div class="vscroll-head">
       <table><thead><tr>
-        <th class="ns" style="width:48px">#</th>
+        <th class="no-sort" style="width:48px">#</th>
         <th onclick="sortBy('StartDate')">Start Date</th>
         <th onclick="sortBy('EndDate')">End Date</th>
-        <th onclick="sortBy('_dur')">Duration</th>
+        <th onclick="sortBy('_durSecs')">Duration</th>
         <th onclick="sortBy('UserName')">User Name</th>
         <th onclick="sortBy('FullName')">Full Name</th>
         <th onclick="sortBy('UserUPN')">UPN</th>
@@ -726,143 +742,693 @@ th.ns{cursor:default}
   </div>
 </div>
 
-<!-- ---------------------------------------------------------------------  PAGER  --------------------------------------------------------------------------------------------- -->
+<!-- Pager -->
 <div class="pgr">
-  <span class="pgr-info">Rows/page:</span>
+  <span class="pgr-info">Rows per page:</span>
   <select id="pgSz" onchange="changePageSize()">
+    <option value="200">200</option>
     <option value="500">500</option>
     <option value="1000" selected>1000</option>
     <option value="2000">2000</option>
     <option value="5000">5000</option>
   </select>
   <button id="pgFi" onclick="goPage(1)">&laquo;</button>
-  <button id="pgPv" onclick="goPage(cur-1)">&lsaquo; Prev</button>
+  <button id="pgPv" onclick="goPage(curPage-1)">&lsaquo; Prev</button>
   <span id="pgNm"></span>
-  <button id="pgNx" onclick="goPage(cur+1)">Next &rsaquo;</button>
-  <button id="pgLa" onclick="goPage(totPages())">&raquo;</button>
+  <button id="pgNx" onclick="goPage(curPage+1)">Next &rsaquo;</button>
+  <button id="pgLa" onclick="goPage(totalPages())">&raquo;</button>
   <span id="pgIn" class="pgr-info" style="margin-left:5px"></span>
 </div>
 
-<!-- ---------------------------------------------------------------------  FOOTER  ------------------------------------------------------------------------------------------ -->
-<footer class="page-ftr">
-  <div class="ftr-brand">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(216,0,116)" stroke-width="2.2">
-      <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
-    </svg>
-    <span>VCLite Citrix Billing Report</span>
-    
-  </div>
-  <div class="ftr-meta" id="ftrMeta">---</div>
-</footer>
+<!-- Footer -->
+<div class="footer">
+  <span id="ftrLine1"><strong>Citrix Session Report v9.0</strong></span>
+  &nbsp;|&nbsp;<span id="ftrLine2"></span>
+</div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-/* VCLite Billing Report Engine */
+/* ===========================================================
+   CITRIX SESSION REPORT v9.0 -- Engine
+   BUG FIXES vs v8:
+     1. Row numbers now always 1-based from absolute position
+     2. resetFilters() fully clears every .active class
+     3. Export row-number key fixed (_rn handled inline)
+     4. Duration filter uses parsed float, not NaN check
+   NEW:
+     5. UserName dropdown filter
+     6. ISP dropdown filter
+     7. Min / Max Duration (seconds) filters
+     8. Skipped stat card
+     9. rbar shows skipped count separately
+    10. Two-row filter bar with section labels
+=========================================================== */
 
-/* -- Column layout --------------------------------------- */
+/* -- Column definitions ----------------------------------- */
 var COLS=[
-  {k:"StartDate",             w:148,c:""},
-  {k:"EndDate",               w:148,c:""},
-  {k:"_durLbl",               w:92, c:"dur"},
-  {k:"UserName",              w:132,c:"bold"},
-  {k:"FullName",              w:148,c:""},
-  {k:"UserUPN",               w:188,c:"mu"},
-  {k:"MachineName",           w:152,c:""},
-  {k:"MachineOS",             w:132,c:""},
-  {k:"CatalogName",           w:132,c:""},
-  {k:"DesktopGroupName",      w:148,c:""},
-  {k:"ClientPlatform",        w:102,c:"_plat"},
-  {k:"Protocol",              w:84, c:"_proto"},
-  {k:"ClientName",            w:148,c:""},
-  {k:"ClientVersion",         w:128,c:"mu"},
-  {k:"ClientIP",              w:132,c:"mono"},
-  {k:"ClientPublicIP",        w:132,c:"mono"},
-  {k:"ClientCountry",         w:112,c:""},
-  {k:"ClientCity",            w:112,c:""},
-  {k:"ClientISP",             w:168,c:""},
-  {k:"ConnectedViaHostName",  w:188,c:""},
-  {k:"ConnectedViaIPAddress", w:144,c:"mono"},
-  {k:"LaunchedViaHostName",   w:188,c:""},
-  {k:"LaunchedViaIPAddress",  w:144,c:"mono"}
+  {key:"StartDate",             w:148,cls:""},
+  {key:"EndDate",               w:148,cls:""},
+  {key:"_durLabel",             w:90, cls:"dur"},
+  {key:"UserName",              w:130,cls:"bold"},
+  {key:"FullName",              w:145,cls:""},
+  {key:"UserUPN",               w:185,cls:"muted"},
+  {key:"MachineName",           w:150,cls:""},
+  {key:"MachineOS",             w:130,cls:""},
+  {key:"CatalogName",           w:130,cls:""},
+  {key:"DesktopGroupName",      w:145,cls:""},
+  {key:"ClientPlatform",        w:100,cls:"bdg-plat"},
+  {key:"Protocol",              w:82, cls:"bdg-proto"},
+  {key:"ClientName",            w:145,cls:""},
+  {key:"ClientVersion",         w:125,cls:"muted"},
+  {key:"ClientIP",              w:130,cls:"mono"},
+  {key:"ClientPublicIP",        w:130,cls:"mono"},
+  {key:"ClientCountry",         w:110,cls:""},
+  {key:"ClientCity",            w:110,cls:""},
+  {key:"ClientISP",             w:165,cls:""},
+  {key:"ConnectedViaHostName",  w:185,cls:""},
+  {key:"ConnectedViaIPAddress", w:142,cls:"mono"},
+  {key:"LaunchedViaHostName",   w:185,cls:""},
+  {key:"LaunchedViaIPAddress",  w:142,cls:"mono"}
 ];
-var NW=48, RH=30;
+var NUM_W=48, ROW_H=30;
 
-/* -- State ----------------------------------------------- */
-var RAW=[],filtered=[],META={};
-var SKIP_TOTAL=0;
-var cur=1,psz=1000;
-var debT=null,sCol="",sAsc=true;
-var vWrap,vBody,pageRows=[];
-var TODAY=todayStr();
+/* -- State ------------------------------------------------ */
+var RAW=[], filtered=[], META={};
+var SKIPPED_TOTAL=0;
+var curPage=1, pageSize=1000;
+var debT=null, sortCol="", sortAsc=true;
+var vWrap=null, vBody=null, pageRows=[];
+var TODAY=todayLocal();
 
-function todayStr(){
+/* -- Today string ----------------------------------------- */
+function todayLocal(){
   var d=new Date();
-  return d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate());
+  return d.getFullYear()+"-"+
+    pad2(d.getMonth()+1)+"-"+pad2(d.getDate());
 }
-function p2(n){return n<10?"0"+n:String(n);}
+function pad2(n){return n<10?"0"+n:String(n);}
 
-/* VCLite Citrix Billing Report - Template File */
+/* ==========================================================
+   SESSION VALIDITY (mirrors PS1 Is-ValidSession)
+   Rule 1: StartDate missing             -&gt; skip
+   Rule 2: EndDate   missing             -&gt; skip (still active)
+   Rule 3: StartDate === EndDate (exact) -&gt; skip (zero-duration)
+   Rule 4: StartDate date part == today  -&gt; skip (may still run)
+========================================================== */
+function isValidSession(r){
+  var sd=r.StartDate||"";
+  var ed=r.EndDate  ||"";
+  if(!sd)return false;                          /* Rule 1 */
+  if(!ed)return false;                          /* Rule 2 */
+  if(sd===ed)return false;                      /* Rule 3 */
+  if(sd.substring(0,10)===TODAY)return false;   /* Rule 4 */
+  return true;
+}
+
+/* -- Safe JSON reader ------------------------------------- */
+function safeGet(id){
+  var el=document.getElementById(id);
+  if(!el)return null;
+  var txt=el.textContent.trim();
+  if(txt.indexOf("CITRIX_")===0&&txt.indexOf("PLACEHOLDER")>0)return"PLACEHOLDER";
+  try{return JSON.parse(txt);}catch(e){console.error("JSON#"+id,e);return null;}
+}
+
+/* -- Duration --------------------------------------------- */
+function calcDur(a,b){
+  if(!a||!b)return{secs:0,label:""};
+  try{
+    var d=Math.floor((new Date(b)-new Date(a))/1000);
+    if(d<=0)return{secs:0,label:"0s"};
+    var h=Math.floor(d/3600),m=Math.floor((d%3600)/60),s=d%60;
+    return{secs:d,label:((h?h+"h ":"")+(m||h?m+"m ":"")+s+"s").trim()};
+  }catch(e){return{secs:0,label:""};}
+}
+
+/* -- Init ------------------------------------------------- */
+window.addEventListener("DOMContentLoaded",function(){
+  vWrap=document.getElementById("vWrap");
+  vBody=document.getElementById("vBody");
+
+  var rawData=safeGet("citrix-data");
+  META=safeGet("citrix-meta")||{};
+
+  if(rawData==="PLACEHOLDER"||META==="PLACEHOLDER"){
+    document.getElementById("setupBanner").classList.add("show");
+    document.getElementById("rbarTxt").textContent="No data -- run the PS1 script first.";
+    document.getElementById("hdrMeta").textContent=" -- Template not populated";
+    document.getElementById("btnCSV").disabled=true;
+    document.getElementById("btnExcel").disabled=true;
+    return;
+  }
+  if(!Array.isArray(rawData)){
+    document.getElementById("rbarTxt").textContent=
+      "Data missing or corrupted -- re-run CitrixSessionReport_v9.ps1";
+    document.getElementById("btnCSV").disabled=true;
+    document.getElementById("btnExcel").disabled=true;
+    return;
+  }
+
+  /* Validate, enrich */
+  SKIPPED_TOTAL=0;
+  RAW=[];
+  rawData.forEach(function(r){
+    if(!isValidSession(r)){SKIPPED_TOTAL++;return;}
+    var dur=calcDur(r.StartDate,r.EndDate);
+    r._durSecs=dur.secs;
+    r._durLabel=dur.label;
+    RAW.push(r);
+  });
+
+  /* Header */
+  var m="";
+  if(META.queryStart&&META.queryEnd)
+    m=" -- "+META.queryStart.substring(0,10)+" -&gt; "+META.queryEnd.substring(0,10);
+  if(META.generated)m+="  |  Generated: "+META.generated;
+  document.getElementById("hdrMeta").textContent=m;
+
+  /* Footer */
+  document.getElementById("ftrLine1").innerHTML=
+    "<strong>Citrix Session Report v9.0</strong>";
+  document.getElementById("ftrLine2").textContent=
+    RAW.length.toLocaleString()+" valid sessions"+
+    (SKIPPED_TOTAL?" | "+SKIPPED_TOTAL.toLocaleString()+" skipped (invalid/incomplete)":"")+
+    (META.sha256?" | SHA-256: "+META.sha256.substring(0,16)+"...":"");
+
+  /* Skipped card */
+  document.getElementById("sc-skip").textContent=SKIPPED_TOTAL.toLocaleString();
+  if(SKIPPED_TOTAL>0){
+    var skipEl=document.getElementById("rbarSkip");
+    skipEl.style.display="inline";
+    skipEl.textContent="(!) "+SKIPPED_TOTAL.toLocaleString()+" invalid/incomplete sessions excluded";
+  }
+
+  buildDropdowns();
+  applyFilters();
+  vWrap.addEventListener("scroll",function(){renderVisible();},{passive:true});
+});
+
+/* -- Dropdown population ---------------------------------- */
+function buildDropdowns(){
+  var map={
+    fUN:"UserName",fCo:"ClientCountry",fCi:"ClientCity",
+    fIS:"ClientISP",fPl:"ClientPlatform",fOS:"MachineOS",
+    fCa:"CatalogName",fDG:"DesktopGroupName",fPr:"Protocol"
+  };
+  var sets={fUN:{},fCo:{},fCi:{},fIS:{},fPl:{},fOS:{},fCa:{},fDG:{},fPr:{}};
+  RAW.forEach(function(r){
+    Object.keys(map).forEach(function(id){
+      var v=r[map[id]];if(v)sets[id][v]=1;
+    });
+  });
+  Object.keys(sets).forEach(function(id){
+    var sel=document.getElementById(id);
+    Object.keys(sets[id]).sort().forEach(function(v){
+      var o=document.createElement("option");o.value=v;o.textContent=v;sel.appendChild(o);
+    });
+  });
+}
+
+/* ==========================================================
+   APPLY FILTERS
+   Note: validity rules are already applied at load time (RAW
+   only contains valid sessions). Filters here are user-driven.
+========================================================== */
+var ALL_FILTER_IDS=["fSrch","fUN","fCo","fCi","fIS","fPl","fOS",
+                    "fCa","fDG","fPr","fDf","fDt","fDurMin","fDurMax"];
+
+function applyFilters(){
+  var srch =(document.getElementById("fSrch").value||"").toLowerCase().trim();
+  var un   =document.getElementById("fUN").value;
+  var co   =document.getElementById("fCo").value;
+  var ci   =document.getElementById("fCi").value;
+  var isp  =document.getElementById("fIS").value;
+  var pl   =document.getElementById("fPl").value;
+  var os   =document.getElementById("fOS").value;
+  var ca   =document.getElementById("fCa").value;
+  var dg   =document.getElementById("fDG").value;
+  var pr   =document.getElementById("fPr").value;
+  var df   =document.getElementById("fDf").value;
+  var dt   =document.getElementById("fDt").value;
+  var durMinRaw=document.getElementById("fDurMin").value;
+  var durMaxRaw=document.getElementById("fDurMax").value;
+
+  /* Parse duration bounds -- FIX: use parseFloat, guard NaN */
+  var durMin=durMinRaw!=""?parseFloat(durMinRaw):null;
+  var durMax=durMaxRaw!=""?parseFloat(durMaxRaw):null;
+  if(durMin!==null&&isNaN(durMin))durMin=null;
+  if(durMax!==null&&isNaN(durMax))durMax=null;
+
+  /* Count active filters */
+  var active=0;
+  if(srch)active++;if(un)active++;if(co)active++;if(ci)active++;
+  if(isp)active++;if(pl)active++;if(os)active++;if(ca)active++;
+  if(dg)active++;if(pr)active++;if(df)active++;if(dt)active++;
+  if(durMin!==null)active++;if(durMax!==null)active++;
+
+  /* FIX: properly toggle .active on all inputs + selects */
+  ALL_FILTER_IDS.forEach(function(id){
+    var el=document.getElementById(id);
+    if(!el)return;
+    var hasVal=el.value!=="";
+    el.classList.toggle("active",hasVal);
+  });
+
+  /* Filter chip */
+  document.getElementById("filterChip").className=
+    "filterChip"+(active?" on":"");
+  document.getElementById("filterChipTxt").textContent=
+    active+" filter"+(active!==1?"s":"")+" active";
+
+  /* Export badges */
+  document.getElementById("csvBadge").className="fbadge"+(active?" on":"");
+  document.getElementById("excelBadge").className="fbadge"+(active?" on":"");
+
+  /* Today-exclusion notice -- always on (rules always active) */
+  document.getElementById("dateNote").className="date-note on";
+
+  /* -- Filter RAW --------------------------------------- */
+  filtered=RAW.filter(function(r){
+    if(un &&r.UserName!==un)return false;
+    if(co &&r.ClientCountry!==co)return false;
+    if(ci &&r.ClientCity!==ci)return false;
+    if(isp&&r.ClientISP!==isp)return false;
+    if(pl &&r.ClientPlatform!==pl)return false;
+    if(os &&r.MachineOS!==os)return false;
+    if(ca &&r.CatalogName!==ca)return false;
+    if(dg &&r.DesktopGroupName!==dg)return false;
+    if(pr &&r.Protocol!==pr)return false;
+
+    /* Date range (date-part only) */
+    if(df||dt){
+      var sd=(r.StartDate||"").substring(0,10);
+      if(df&&sd<df)return false;
+      if(dt&&sd>dt)return false;
+    }
+
+    /* Duration range -- FIX: compare against _durSecs (number) */
+    if(durMin!==null&&r._durSecs<durMin)return false;
+    if(durMax!==null&&r._durSecs>durMax)return false;
+
+    /* Text search */
+    if(srch){
+      var hay=((r.UserName||"")+(r.FullName||"")+(r.MachineName||"")+
+               (r.ClientIP||"")+(r.ClientPublicIP||"")+(r.ClientName||"")+
+               (r.UserUPN||"")+(r.ClientCountry||"")+(r.ClientCity||"")+
+               (r.ClientISP||"")).toLowerCase();
+      if(hay.indexOf(srch)<0)return false;
+    }
+    return true;
+  });
+
+  if(sortCol)doSort(false);
+  curPage=1;
+  updateStats();
+  updateRbar();
+  goPage(1);
+}
+
+/* FIX: resetFilters clears ALL inputs/selects including new ones,
+   and explicitly removes .active class from every filter element */
+function resetFilters(){
+  ALL_FILTER_IDS.forEach(function(id){
+    var el=document.getElementById(id);
+    if(!el)return;
+    if(el.tagName==="SELECT")el.selectedIndex=0;
+    else el.value="";
+    el.classList.remove("active");   /* explicit class removal */
+  });
+  sortCol="";sortAsc=true;
+  document.querySelectorAll("th[onclick]").forEach(function(th){
+    th.classList.remove("sort-asc","sort-desc");
+  });
+  applyFilters();
+}
+
+function debounce(){clearTimeout(debT);debT=setTimeout(applyFilters,280);}
+
+/* -- Stats ------------------------------------------------ */
+function updateStats(){
+  var src=filtered;
+  document.getElementById("sc-total").textContent=src.length.toLocaleString();
+  var users={},machs={},ctries={},plats={},cats={},durSum=0,durCnt=0;
+  src.forEach(function(r){
+    if(r.UserName)users[r.UserName]=1;
+    if(r.MachineName)machs[r.MachineName]=1;
+    if(r.ClientCountry)ctries[r.ClientCountry]=1;
+    if(r.ClientPlatform)plats[r.ClientPlatform]=1;
+    if(r.CatalogName)cats[r.CatalogName]=1;
+    if(r._durSecs>0){durSum+=r._durSecs;durCnt++;}
+  });
+  document.getElementById("sc-users").textContent=Object.keys(users).length.toLocaleString();
+  document.getElementById("sc-mach").textContent=Object.keys(machs).length.toLocaleString();
+  document.getElementById("sc-ctry").textContent=Object.keys(ctries).length.toLocaleString();
+  document.getElementById("sc-plat").textContent=Object.keys(plats).length.toLocaleString();
+  document.getElementById("sc-cat").textContent=Object.keys(cats).length.toLocaleString();
+  document.getElementById("sc-skip").textContent=SKIPPED_TOTAL.toLocaleString();
+  if(durCnt>0){
+    var avg=Math.round(durSum/durCnt);
+    var h=Math.floor(avg/3600),m=Math.floor((avg%3600)/60),s=avg%60;
+    document.getElementById("sc-avgd").textContent=
+      (h?h+"h ":"")+(m||h?m+"m ":"")+s+"s";
+  }else document.getElementById("sc-avgd").textContent="--";
+}
+
+function updateRbar(){
+  var tot=filtered.length,raw=RAW.length;
+  var txt=tot.toLocaleString()+" session"+(tot!==1?"s":"");
+  if(tot<raw)txt+=" (filtered from "+raw.toLocaleString()+" valid)";
+  document.getElementById("rbarTxt").textContent=txt;
+}
+
+/* -- Sort ------------------------------------------------- */
+function sortBy(col){
+  sortCol===col?sortAsc=!sortAsc:(sortCol=col,sortAsc=true);
+  document.querySelectorAll("th[onclick]").forEach(function(th){
+    th.classList.remove("sort-asc","sort-desc");
+    if((th.getAttribute("onclick")||"").indexOf("'"+col+"'")>=0)
+      th.classList.add(sortAsc?"sort-asc":"sort-desc");
+  });
+  doSort(true);goPage(1);
+}
+function doSort(r){
+  var c=sortCol,a=sortAsc;
+  filtered.sort(function(x,y){
+    var av=x[c]||"",bv=y[c]||"";
+    if(typeof av==="number"&&typeof bv==="number")return a?av-bv:bv-av;
+    return a?String(av).localeCompare(String(bv)):String(bv).localeCompare(String(av));
+  });
+  if(r)goPage(1);
+}
+
+/* -- Paging ----------------------------------------------- */
+function totalPages(){return Math.max(1,Math.ceil(filtered.length/pageSize));}
+function goPage(n){
+  n=Math.max(1,Math.min(n,totalPages()));curPage=n;
+  updatePager();rebuildVirtualScroll();
+}
+function changePageSize(){
+  pageSize=parseInt(document.getElementById("pgSz").value,10);
+  curPage=1;updatePager();rebuildVirtualScroll();
+}
+function updatePager(){
+  var tot=totalPages(),cnt=filtered.length;
+  var s=(curPage-1)*pageSize+1,e=Math.min(curPage*pageSize,cnt);
+  document.getElementById("pgNm").textContent="Page "+curPage+" / "+tot;
+  document.getElementById("pgIn").textContent=
+    cnt?s.toLocaleString()+"-"+e.toLocaleString()+" of "+cnt.toLocaleString():"No results";
+  document.getElementById("pgFi").disabled=curPage<=1;
+  document.getElementById("pgPv").disabled=curPage<=1;
+  document.getElementById("pgNx").disabled=curPage>=tot;
+  document.getElementById("pgLa").disabled=curPage>=tot;
+}
+
+/* -- Virtual scroll --------------------------------------- */
+function rebuildVirtualScroll(){
+  var s=(curPage-1)*pageSize,e=Math.min(s+pageSize,filtered.length);
+  pageRows=filtered.slice(s,e);
+  vBody.style.height=(pageRows.length*ROW_H)+"px";
+  vBody.style.position="relative";
+  vWrap.scrollTop=0;renderVisible();
+}
+function renderVisible(){
+  if(!pageRows.length){
+    vBody.innerHTML=
+      '<div class="no-rows">'+
+      '<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">'+
+      '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'+
+      'No sessions match the current filters</div>';
+    return;
+  }
+  var st=vWrap.scrollTop,vh=vWrap.clientHeight;
+  var si=Math.max(0,Math.floor(st/ROW_H)-5);
+  var ei=Math.min(pageRows.length-1,Math.ceil((st+vh)/ROW_H)+5);
+
+  vBody.querySelectorAll(".vrow[data-i]").forEach(function(el){
+    var i=parseInt(el.getAttribute("data-i"),10);
+    if(i<si||i>ei)el.remove();
+  });
+  var rendered={};
+  vBody.querySelectorAll(".vrow[data-i]").forEach(function(el){
+    rendered[el.getAttribute("data-i")]=true;
+  });
+
+  var frag=document.createDocumentFragment();
+  /* FIX: row number = absolute position in filtered set (1-based) */
+  var pageStart=(curPage-1)*pageSize;
+
+  for(var i=si;i<=ei;i++){
+    if(rendered[i])continue;
+    var r=pageRows[i];
+    var absRowNum=pageStart+i+1;   /* FIX: +1 to make 1-based */
+    var row=document.createElement("div");
+    row.className="vrow "+(i%2===0?"even":"odd");
+    row.setAttribute("data-i",i);
+    row.style.cssText=
+      "position:absolute;top:"+(i*ROW_H)+"px;left:0;right:0;height:"+ROW_H+"px;display:flex";
+
+    /* Row number cell */
+    var nc=document.createElement("div");
+    nc.className="vcell num";nc.style.width=NUM_W+"px";
+    nc.textContent=absRowNum;      /* FIX: was ps+i (missing +1) */
+    row.appendChild(nc);
+
+    COLS.forEach(function(col){
+      var c=document.createElement("div");
+      c.style.width=col.w+"px";
+      var v=r[col.key]||"";
+      if(col.cls==="bdg-plat"){
+        c.className="vcell";c.innerHTML=platBadge(v);
+      }else if(col.cls==="bdg-proto"){
+        c.className="vcell";c.innerHTML=protoBadge(v);
+      }else{
+        c.className="vcell "+(col.cls||"");
+        c.textContent=v;if(v)c.title=v;
+      }
+      row.appendChild(c);
+    });
+    frag.appendChild(row);
+  }
+  vBody.appendChild(frag);
+}
+
+function platBadge(v){
+  if(!v)return"";
+  var l=v.toLowerCase();
+  var cls=l.indexOf("win")>=0?"b-win":l.indexOf("mac")>=0?"b-mac":
+          l.indexOf("lin")>=0?"b-lnx":l.indexOf("ios")>=0?"b-ios":
+          l.indexOf("and")>=0?"b-adr":"b-oth";
+  return'<span class="bdg '+cls+'">'+esc(v)+'</span>';
+}
+function protoBadge(v){
+  if(!v)return"";
+  var l=v.toLowerCase();
+  var cls=l.indexOf("hdx")>=0?"b-hdx":l.indexOf("rdp")>=0?"b-rdp":"b-prt";
+  return'<span class="bdg '+cls+'">'+esc(v)+'</span>';
+}
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+/* == EXPORTS ================================================ */
 var EH=["#","Start Date","End Date","Duration","User Name","Full Name","UPN",
   "Machine","OS","Catalog","Desktop Group","Platform","Protocol",
   "Client Name","Client Ver","Client IP","Public IP",
-  "Country","City","ISP","Connected Via Host","Connected Via IP",
-  "Launched Via Host","Launched Via IP"];
-var EK=["StartDate","EndDate","_durLbl","UserName","FullName","UserUPN",
+  "Country","City","ISP",
+  "Connected Via Host","Connected Via IP","Launched Via Host","Launched Via IP"];
+var EK=["StartDate","EndDate","_durLabel","UserName","FullName","UserUPN",
   "MachineName","MachineOS","CatalogName","DesktopGroupName","ClientPlatform","Protocol",
   "ClientName","ClientVersion","ClientIP","ClientPublicIP",
   "ClientCountry","ClientCity","ClientISP",
   "ConnectedViaHostName","ConnectedViaIPAddress","LaunchedViaHostName","LaunchedViaIPAddress"];
 
-function csvRow(arr){
-  return arr.map(function(v){
-    var s=String(v==null?"":v);
-    return(s.indexOf(",")>=0||s.indexOf('"')>=0||s.indexOf("\n")>=0)?
-      '"'+s.replace(/"/g,'""')+'"':s;
-  }).join(",");
+/* FIX: row number is prepended separately -- no _rn key mismatch */
+function buildExportRows(src){
+  var rows=[EH.slice()];
+  src.forEach(function(r,i){
+    var row=[i+1];                   /* row number -- always correct */
+    EK.forEach(function(k){row.push(r[k]||"");});
+    rows.push(row);
+  });
+  return rows;
 }
 
 function doCSV(){
-  var btn=document.getElementById("btnCSV");
-  btn.disabled=true; showProg("Preparing CSV...");
   var isF=filtered.length!==RAW.length;
   var src=isF?filtered:RAW;
-  var tot=src.length, CHUNK=10000, idx=0;
-  var parts=["\uFEFF"+csvRow(EH)+"\r\n"];
+  var rows=buildExportRows(src);
+  var csv=rows.map(function(r){
+    return r.map(function(v){
+      var s=String(v);
+      return(s.indexOf(",")>=0||s.indexOf('"')>=0||s.indexOf("\n")>=0)?
+        '"'+s.replace(/"/g,'""')+'"':s;
+    }).join(",");
+  }).join("\r\n");
+  triggerDL(new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"}),
+    "CitrixSessions"+(isF?"_FILTERED":"")+"_"+stamp()+".csv");
+  toast("CSV downloaded -- "+(rows.length-1).toLocaleString()+" rows"+(isF?" (filtered)":""));
+}
 
+function doExcel(){
+  var btn=document.getElementById("btnExcel");
+  btn.disabled=true;showProg("Building Excel...");
+  var isF=filtered.length!==RAW.length;
+  var src=isF?filtered:RAW;
+  var tot=src.length,proc=0;
+  var exRows=[EH.slice()];
   function pump(){
-    var end=Math.min(idx+CHUNK,tot);
-    for(var i=idx;i<end;i++){
-      var r=src[i],row=[i+1];
-      EK.forEach(function(k){row.push(r[k]||"");});
-      parts.push(csvRow(row)+"\r\n");
-    }
-    idx=end;
-    setProg(Math.round(idx/Math.max(tot,1)*95),"Writing "+idx.toLocaleString()+" / "+tot.toLocaleString()+"...");
-    if(idx<tot){ setTimeout(pump,0); return; }
-    /* All chunks done --- combine and trigger download */
-    var blob=new Blob(parts,{type:"text/csv;charset=utf-8"});
-    var df=g("fDf").value||"all", dt=g("fDt").value||"all";
-    var fname="VCLite_BillingReport_"+df+"_to_"+dt+(isF?"_FILTERED":"")+".csv";
-    triggerDL(blob,fname);
-    hideProg(); btn.disabled=false;
-    toast("CSV downloaded --- "+tot.toLocaleString()+" rows"+(isF?" (filtered)":""));
+    try{
+      var chunk=Math.min(5000,tot-proc);
+      for(var i=0;i<chunk;i++){
+        var r=src[proc];
+        var row=[proc+1];
+        EK.forEach(function(k){row.push(r[k]||"");});
+        exRows.push(row);proc++;
+      }
+      setProg(Math.round(proc/Math.max(tot,1)*70),
+        "Building "+proc.toLocaleString()+" / "+tot.toLocaleString()+"...");
+      if(proc<tot){setTimeout(pump,0);return;}
+      setProg(80,"Building XLSX...");
+      setTimeout(function(){
+        try{
+          var xlsx=buildXLSX(exRows,isF);
+          setProg(98,"Writing file...");
+          setTimeout(function(){
+            triggerDL(new Blob([xlsx],
+              {type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
+              "CitrixSessions"+(isF?"_FILTERED":"")+"_"+stamp()+".xlsx");
+            setProg(100,"Done -- "+tot.toLocaleString()+" rows");
+            setTimeout(function(){hideProg();btn.disabled=false;},2500);
+            toast("Excel ready -- "+tot.toLocaleString()+" rows"+(isF?" (filtered)":""));
+          },30);
+        }catch(e){xFail(btn,e);}
+      },30);
+    }catch(e){xFail(btn,e);}
   }
   setTimeout(pump,0);
 }
+function xFail(btn,e){
+  console.error(e);hideProg();btn.disabled=false;
+  toast("Excel failed -- downloading CSV instead.");doCSV();
+}
 
+/* -- Inline XLSX builder ---------------------------------- */
+function buildXLSX(rows,isF){
+  var cc=rows[0].length,cw="";
+  for(var ci=0;ci<cc;ci++)
+    cw+='<col min="'+(ci+1)+'" max="'+(ci+1)+'" width="22" customWidth="1"/>';
+  var ss=[],ssM={};
+  function si(v){var s=v==null?"":String(v);
+    if(ssM[s]===undefined){ssM[s]=ss.length;ss.push(s);}return ssM[s];}
+  var sr="";
+  for(var ri=0;ri<rows.length;ri++){
+    var row=rows[ri],cells="";
+    for(var ci2=0;ci2<row.length;ci2++){
+      var ref=cN(ci2)+(ri+1),st=(ri===0)?1:0;
+      cells+='<c r="'+ref+'" t="s" s="'+st+'"><v>'+si(row[ci2])+"</v></c>";
+    }
+    sr+='<row r="'+(ri+1)+'">'+cells+"</row>";
+  }
+  var wsN=isF?"Sessions (Filtered)":"Sessions";
+  var sh='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'+
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheetViews><sheetView workbookViewId="0">'+
+    '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'+
+    '</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>'+
+    '<cols>'+cw+'</cols><sheetData>'+sr+'</sheetData>'+
+    '<autoFilter ref="A1:'+cN(cc-1)+'1"/></worksheet>';
+  var ssX='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'+
+    ' count="'+ss.length+'" uniqueCount="'+ss.length+'">'+
+    ss.map(function(s){return"<si><t>"+xe(s)+"</t></si>";}).join("")+"</sst>";
+  var stX='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'+
+    '<font><sz val="11"/><b/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>'+
+    '<fills count="3"><fill><patternFill patternType="none"/></fill>'+
+    '<fill><patternFill patternType="gray125"/></fill>'+
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFD80074"/></patternFill></fill></fills>'+
+    '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'+
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+    '<cellXfs count="2">'+
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'+
+    '</cellXfs></styleSheet>';
+  var wbX='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'+
+    ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets><sheet name="'+xe(wsN)+'" sheetId="1" r:id="rId1"/></sheets></workbook>';
+  var wbR='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'+
+    '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'+
+    '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+  var rR='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  var ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+    '<Default Extension="xml" ContentType="application/xml"/>'+
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'+
+    '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'+
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+  return zipFiles([
+    {n:"[Content_Types].xml",d:ct},{n:"_rels/.rels",d:rR},
+    {n:"xl/workbook.xml",d:wbX},{n:"xl/_rels/workbook.xml.rels",d:wbR},
+    {n:"xl/worksheets/sheet1.xml",d:sh},{n:"xl/sharedStrings.xml",d:ssX},
+    {n:"xl/styles.xml",d:stX}
+  ]);
+}
+
+/* -- ZIP helpers ------------------------------------------ */
+function s2b(s){var b=new Uint8Array(s.length);for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i)&0xFF;return b;}
+function xe(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function cN(n){var s="";n++;while(n>0){s=String.fromCharCode(65+((n-1)%26))+s;n=Math.floor((n-1)/26);}return s;}
+var CT=(function(){var t=new Int32Array(256);for(var i=0;i<256;i++){var c=i;for(var j=0;j<8;j++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[i]=c;}return t;})();
+function crc32(b){var c=0xFFFFFFFF;for(var i=0;i<b.length;i++)c=CT[(c^b[i])&0xFF]^(c>>>8);return(c^0xFFFFFFFF)>>>0;}
+function u32(n){return[n&0xFF,(n>>8)&0xFF,(n>>16)&0xFF,(n>>24)&0xFF];}
+function u16(n){return[n&0xFF,(n>>8)&0xFF];}
+function zipFiles(files){
+  var cds=[],off=0,parts=[];
+  files.forEach(function(f){
+    var nb=s2b(f.n),db=s2b(f.d),crc=crc32(db),sz=db.length;
+    var loc=[0x50,0x4B,0x03,0x04,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]
+      .concat(u32(crc)).concat(u32(sz)).concat(u32(sz)).concat(u16(nb.length)).concat([0x00,0x00]);
+    var lb=new Uint8Array(loc.length+nb.length+db.length);
+    lb.set(loc,0);lb.set(nb,loc.length);lb.set(db,loc.length+nb.length);
+    var cd=[0x50,0x4B,0x01,0x02,0x14,0x00,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]
+      .concat(u32(crc)).concat(u32(sz)).concat(u32(sz)).concat(u16(nb.length))
+      .concat([0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00]).concat(u32(off));
+    var cb=new Uint8Array(cd.length+nb.length);cb.set(cd,0);cb.set(nb,cd.length);
+    parts.push(lb);cds.push(cb);off+=lb.length;
+  });
+  var cdSz=cds.reduce(function(a,b){return a+b.length;},0);
+  var eocd=[0x50,0x4B,0x05,0x06,0x00,0x00,0x00,0x00]
+    .concat(u16(files.length)).concat(u16(files.length))
+    .concat(u32(cdSz)).concat(u32(off)).concat([0x00,0x00]);
+  var all=parts.concat(cds).concat([new Uint8Array(eocd)]);
+  var tot=all.reduce(function(a,b){return a+b.length;},0);
+  var out=new Uint8Array(tot),pos=0;
+  all.forEach(function(b){out.set(b,pos);pos+=b.length;});
+  return out;
+}
 function triggerDL(blob,name){
   var url=URL.createObjectURL(blob);
   var a=document.createElement("a");a.href=url;a.download=name;a.style.display="none";
   document.body.appendChild(a);a.click();
-  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
 }
-function showProg(m){g("progArea").style.display="flex";setProg(0,m);}
-function setProg(p,m){g("progFill").style.width=p+"%";set("progTxt",m);}
-function hideProg(){g("progArea").style.display="none";setProg(0,"");}
-function toast(m){var e=g("toast");e.textContent=m;e.classList.add("on");setTimeout(function(){e.classList.remove("on");},3500);}
-function g(id){return document.getElementById(id);}
-function set(id,val){var e=g(id);if(e)e.textContent=val;}
+function stamp(){return new Date().toISOString().substring(0,10);}
+function showProg(m){document.getElementById("progArea").style.display="flex";setProg(0,m);}
+function setProg(p,m){document.getElementById("progFill").style.width=p+"%";
+  document.getElementById("progTxt").textContent=m;}
+function hideProg(){document.getElementById("progArea").style.display="none";setProg(0,"");}
+function toast(m){var e=document.getElementById("toast");e.textContent=m;
+  e.classList.add("on");setTimeout(function(){e.classList.remove("on");},3500);}
 </script>
 </body>
 </html>
