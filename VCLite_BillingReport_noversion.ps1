@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 # ==============================================================================
-#  VCLite Citrix Billing Report  — LOCAL TEST BUILD
+#  VCLite Citrix Billing Report  - LOCAL TEST BUILD
 #  Credentials : Hardcoded in SECTION 1 below (for local testing only)
 #  INI file    : NOT required
 #  Date range  : Optional parameters; defaults to previous calendar month (UTC)
@@ -16,7 +16,7 @@ param(
 )
 
 # ==============================================================================
-# SECTION 1 — CREDENTIALS & SETTINGS  (edit this block for local testing)
+# SECTION 1 - CREDENTIALS & SETTINGS  (edit this block for local testing)
 # ==============================================================================
 $CustomerId   = "ewy3n89x3jns"
 $ClientId     = "ba3e7acc-79b1-41ad-835c-90f10f4dd185"
@@ -36,7 +36,7 @@ $TemplatePath = Join-Path $ScriptDir "VCLite_BillingReport.html"
 $OutputFolder = Join-Path $ScriptDir "output"
 
 # ==============================================================================
-# DATE RANGE  — defaults to previous full calendar month (UTC)
+# DATE RANGE  - defaults to previous full calendar month (UTC)
 # Fix: use .NET DateTime formatting to avoid PS string interpolation issues
 #      with format specifiers containing T and Z.
 # ==============================================================================
@@ -117,8 +117,8 @@ function Sanitize-Json {
     param([string]$Json)
     # Use single-quoted replacement targets to avoid PS escape confusion
     $Json = $Json.Replace('</script>', '<\/script>')
-    $Json = $Json.Replace([char]0x2028, ' ')   # LS — line separator
-    $Json = $Json.Replace([char]0x2029, ' ')   # PS — paragraph separator
+    $Json = $Json.Replace([char]0x2028, ' ')   # LS - line separator
+    $Json = $Json.Replace([char]0x2029, ' ')   # PS - paragraph separator
     $Json = $Json.Replace([char]0x0000, '')    # NUL
     return $Json
 }
@@ -130,12 +130,12 @@ function ConvertTo-Base64Utf8 {
 
 # ==============================================================================
 # SESSION VALIDITY
-# Rule 1 : StartDate missing                    → skip
-# Rule 2 : EndDate missing (session still live) → skip
-# Rule 3 : StartDate >= EndDate when parsed     → skip (zero-duration / equal)
+# Rule 1 : StartDate missing                    -> skip
+# Rule 2 : EndDate missing (session still live) -> skip
+# Rule 3 : StartDate >= EndDate when parsed     -> skip (zero-duration / equal)
 #           Parsed comparison catches different string representations of the
 #           same instant (e.g. with/without milliseconds).
-# Rule 4 : StartDate date-part = today UTC      → skip (may still be running)
+# Rule 4 : StartDate date-part = today UTC      -> skip (may still be running)
 # ==============================================================================
 function Test-ValidSession {
     param([Parameter(Mandatory)]$Session)
@@ -220,7 +220,7 @@ function Get-BearerToken {
                         -UseBasicParsing -ErrorAction Stop
         $token = ($response.Content | ConvertFrom-Json).access_token
         if ([string]::IsNullOrWhiteSpace($token)) {
-            throw "Empty token returned — verify CustomerId, ClientId, ClientSecret."
+            throw "Empty token returned - verify CustomerId, ClientId, ClientSecret."
         }
         Write-Log "Bearer token acquired." "OK"
         return $token
@@ -237,9 +237,9 @@ function Invoke-Preflight {
     $warnings = [System.Collections.Generic.List[string]]::new()
 
     # Credentials
-    if ([string]::IsNullOrWhiteSpace($CustomerId))   { $errors.Add("CustomerId is empty — set it in SECTION 1.") }
-    if ([string]::IsNullOrWhiteSpace($ClientId))     { $errors.Add("ClientId is empty — set it in SECTION 1.") }
-    if ([string]::IsNullOrWhiteSpace($ClientSecret)) { $errors.Add("ClientSecret is empty — set it in SECTION 1.") }
+    if ([string]::IsNullOrWhiteSpace($CustomerId))   { $errors.Add("CustomerId is empty - set it in SECTION 1.") }
+    if ([string]::IsNullOrWhiteSpace($ClientId))     { $errors.Add("ClientId is empty - set it in SECTION 1.") }
+    if ([string]::IsNullOrWhiteSpace($ClientSecret)) { $errors.Add("ClientSecret is empty - set it in SECTION 1.") }
 
     # HTML template
     if (Test-Path $TemplatePath) {
@@ -255,13 +255,13 @@ function Invoke-Preflight {
         if ($ds -ge $de) { $errors.Add("QueryStart must be earlier than QueryEnd.") }
         $days = ($de - $ds).TotalDays
         if ($days -gt 366) {
-            $warnings.Add("Date range spans $([Math]::Round($days)) days — may produce very large output.")
+            $warnings.Add("Date range spans $([Math]::Round($days)) days - may produce very large output.")
         }
     } catch {
         $errors.Add("QueryStart or QueryEnd is not a valid date: $($_.Exception.Message)")
     }
 
-    # Output folder — create and verify writable
+    # Output folder - create and verify writable
     try {
         if (-not (Test-Path $OutputFolder)) {
             New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
@@ -279,7 +279,7 @@ function Invoke-Preflight {
 
     if ($errors.Count -gt 0) {
         Write-Host "+============================================================+" -ForegroundColor Red
-        Write-Host "|        PREFLIGHT FAILED — ACTION REQUIRED                  |" -ForegroundColor Red
+        Write-Host "|        PREFLIGHT FAILED - ACTION REQUIRED                  |" -ForegroundColor Red
         Write-Host "+============================================================+" -ForegroundColor Red
         foreach ($e in $errors) { Write-Log "[!] $e" "ERROR" }
         exit 1
@@ -336,7 +336,7 @@ function Write-HtmlChunk {
     $html | Out-File -FilePath $path -Encoding UTF8 -NoNewline
 
     $rowCount = $Buffer.Count.ToString("N0")
-    Write-Log "  Chunk $ChunkIndex — $rowCount rows → $path" "OK"
+    Write-Log "  Chunk $ChunkIndex - $rowCount rows -> $path" "OK"
     return $path
 }
 
@@ -352,7 +352,7 @@ function Export-HtmlReport {
         [string]   $FileStamp
     )
 
-    # Load template — restore placeholder tokens if template was previously populated
+    # Load template - restore placeholder tokens if template was previously populated
     $template = Get-Content -Path $TemplatePath -Raw -Encoding UTF8
     if ($template -notlike "*CITRIX_DATA_PLACEHOLDER_JSON_ARRAY*") {
         $template = $template -replace (
@@ -469,11 +469,11 @@ try {
     Write-Log "Date range   : $QueryStart  ->  $QueryEnd"
     Write-Log ""
 
-    # Step 0 — Preflight
+    # Step 0 - Preflight
     Write-Log "[0/3] Preflight checks..." "STEP"
     Invoke-Preflight
 
-    # Step 1 — Authenticate
+    # Step 1 - Authenticate
     Write-Log "[1/3] Authenticating with Citrix Cloud..." "STEP"
     $token = Get-BearerToken -CustomerId $CustomerId `
                              -ClientId   $ClientId `
@@ -484,7 +484,7 @@ try {
         "Accept"            = "application/json"
     }
 
-    # Step 2 — Build OData query URI
+    # Step 2 - Build OData query URI
     Write-Log "[2/3] Building OData query..." "STEP"
     $encStart = [uri]::EscapeDataString($QueryStart)
     $encEnd   = [uri]::EscapeDataString($QueryEnd)
@@ -496,7 +496,7 @@ try {
                 "&`$top="     + $ApiPageSize
     Write-Log "OData URI built successfully." "OK"
 
-    # Step 3 — Generate HTML report
+    # Step 3 - Generate HTML report
     Write-Log "[3/3] Generating HTML report(s)..." "STEP"
     $fileStamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $htmlFiles = Export-HtmlReport `
@@ -507,7 +507,7 @@ try {
     # Summary
     Write-Host ""
     Write-Host "+============================================================+" -ForegroundColor Green
-    Write-Host "|         REPORT COMPLETE — VCLite Billing Report            |" -ForegroundColor Green
+    Write-Host "|         REPORT COMPLETE - VCLite Billing Report            |" -ForegroundColor Green
     Write-Host "+============================================================+" -ForegroundColor Green
     Write-Host ("|  Date range : " + $QueryStart.Substring(0,10) + "  ->  " + $QueryEnd.Substring(0,10)) -ForegroundColor Green
     Write-Host ("|  Files      : " + $htmlFiles.Count)                          -ForegroundColor Green
