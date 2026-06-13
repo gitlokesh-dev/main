@@ -1,16 +1,27 @@
-[2026-06-13 20:19:46][STEP] ======================================================
-[2026-06-13 20:19:46][STEP]   VCLite Citrix Billing Report
-[2026-06-13 20:19:46][STEP] ======================================================
-[2026-06-13 20:19:46][INFO] CustomerId   : ewy3n89x3jns
-[2026-06-13 20:19:46][INFO] Template     : C:\Scripts\VCLite\VCLite_BillingReport.html
-[2026-06-13 20:19:46][INFO] Output dir   : C:\Scripts\VCLite\output
-[2026-06-13 20:19:46][INFO] Date range   : 2026-05-01T00:00:00Z  ->  2026-05-31T23:59:59Z
-[2026-06-13 20:19:46][INFO] 
-[2026-06-13 20:19:46][STEP] [0/3] Preflight checks...
-[2026-06-13 20:19:46][OK] Output folder created: C:\Scripts\VCLite\output
-[2026-06-13 20:19:46][OK] Output folder writable: C:\Scripts\VCLite\output
+[2026-06-13 20:33:04][STEP] ======================================================
+[2026-06-13 20:33:04][STEP]   VCLite Citrix Billing Report
+[2026-06-13 20:33:04][STEP] ======================================================
+[2026-06-13 20:33:04][INFO] CustomerId   : ewy3n89x3jns
+[2026-06-13 20:33:04][INFO] Template     : C:\Scripts\VCLite\VCLite_BillingReport.html
+[2026-06-13 20:33:04][INFO] Output dir   : C:\Scripts\VCLite\output
+[2026-06-13 20:33:04][INFO] Date range   : 2026-05-01T00:00:00Z  ->  2026-05-31T23:59:59Z
+[2026-06-13 20:33:04][INFO] 
+[2026-06-13 20:33:04][STEP] [0/3] Preflight checks...
+[2026-06-13 20:33:04][WARN] HTML template missing -- writing from embedded content: C:\Scripts\VCLite\VCLite_BillingReport.html
+[2026-06-13 20:33:04][OK] HTML template written successfully: C:\Scripts\VCLite\VCLite_BillingReport.html
+[2026-06-13 20:33:04][OK] Output folder writable: C:\Scripts\VCLite\output
+[2026-06-13 20:33:04][OK] All preflight checks passed.
+[2026-06-13 20:33:04][STEP] [1/3] Authenticating with Citrix Cloud...
+[2026-06-13 20:33:04][STEP] Requesting bearer token...
+[2026-06-13 20:33:05][OK] Bearer token acquired.
+[2026-06-13 20:33:05][STEP] [2/3] Building OData query...
+[2026-06-13 20:33:05][OK] OData URI built successfully.
+[2026-06-13 20:33:05][STEP] [3/3] Generating HTML report(s)...
+
 +============================================================+
-|        PREFLIGHT FAILED - ACTION REQUIRED                  |
+|                  SCRIPT FAILED  [!]                       |
 +============================================================+
-[2026-06-13 20:19:46][ERROR] [!] HTML template not found: C:\Scripts\VCLite\VCLite_BillingReport.html
-  Place VCLite_BillingReport.html beside the PS1.
+[2026-06-13 20:33:07][ERROR] FATAL: Cannot convert argument "newChar", with value: "", for "Replace" to type "System.Char": "Cannot convert value "" to type "System.Char". Error: "String must be exactly one character long.""
+[2026-06-13 20:33:07][ERROR] At: At C:\Windows\TEMP\temp120832920551.ps1:127 char:5
++     $Json = $Json.Replace([char]0x0000, '')    # NUL
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
