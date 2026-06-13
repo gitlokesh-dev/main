@@ -1,53 +1,16 @@
-At C:\Windows\TEMP\temp120830840551.ps1:223 char:45
-+             throw "Empty token returned â?" verify CustomerId, Client ...
-+                                             ~~~~~~
-Unexpected token 'verify' in expression or statement.
-
-At C:\Windows\TEMP\temp120830840551.ps1:222 char:51
-+         if ([string]::IsNullOrWhiteSpace($token)) {
-+                                                   ~
-Missing closing '}' in statement block or type definition.
-
-At C:\Windows\TEMP\temp120830840551.ps1:217 char:9
-+     try {
-+         ~
-Missing closing '}' in statement block or type definition.
-
-At C:\Windows\TEMP\temp120830840551.ps1:240 char:114
-+ ... d))   { $errors.Add("CustomerId is empty â?" set it in SECTION 1.") }
-+                                                                       ~
-The Try statement is missing its Catch or Finally block.
-
-At C:\Windows\TEMP\temp120830840551.ps1:206 char:26
-+ function Get-BearerToken {
-+                          ~
-Missing closing '}' in statement block or type definition.
-
-At C:\Windows\TEMP\temp120830840551.ps1:240 char:114
-+ ... d))   { $errors.Add("CustomerId is empty â?" set it in SECTION 1.") }
-+                                                                       ~
-Unexpected token ')' in expression or statement.
-
-At C:\Windows\TEMP\temp120830840551.ps1:240 char:116
-+ ... d))   { $errors.Add("CustomerId is empty â?" set it in SECTION 1.") }
-+                                                                         ~
-Unexpected token '}' in expression or statement.
-
-At C:\Windows\TEMP\temp120830840551.ps1:241 char:90
-+ ... iteSpace($ClientId))     { $errors.Add("ClientId is empty â?" set it  ...
-+                                                                  ~
-Missing ')' in method call.
-
-At C:\Windows\TEMP\temp120830840551.ps1:241 char:91
-+ ... pace($ClientId))     { $errors.Add("ClientId is empty â?" set it in S ...
-+                                                               ~~~
-Unexpected token 'set' in expression or statement.
-
-At C:\Windows\TEMP\temp120830840551.ps1:241 char:54
-+     if ([string]::IsNullOrWhiteSpace($ClientId))     { $errors.Add("C ...
-+                                                      ~
-Missing closing '}' in statement block or type definition.
-
-Not all parse errors were reported.  Correct the reported errors and try again.
-    + CategoryInfo          : ParserError: (:) [], ParseException
-    + FullyQualifiedErrorId : UnexpectedToken
+[2026-06-13 20:12:47][STEP] ======================================================
+[2026-06-13 20:12:47][STEP]   VCLite Citrix Billing Report
+[2026-06-13 20:12:47][STEP] ======================================================
+[2026-06-13 20:12:47][INFO] CustomerId   : ewy3n89x3jns
+[2026-06-13 20:12:47][INFO] Template     : C:\Windows\TEMP\VCLite_BillingReport.html
+[2026-06-13 20:12:47][INFO] Output dir   : C:\Windows\TEMP\output
+[2026-06-13 20:12:47][INFO] Date range   : 2026-05-01T00:00:00Z  ->  2026-05-31T23:59:59Z
+[2026-06-13 20:12:47][INFO] 
+[2026-06-13 20:12:47][STEP] [0/3] Preflight checks...
+[2026-06-13 20:12:47][OK] Output folder created: C:\Windows\TEMP\output
+[2026-06-13 20:12:47][OK] Output folder writable: C:\Windows\TEMP\output
++============================================================+
+|        PREFLIGHT FAILED - ACTION REQUIRED                  |
++============================================================+
+[2026-06-13 20:12:47][ERROR] [!] HTML template not found: C:\Windows\TEMP\VCLite_BillingReport.html
+  Place VCLite_BillingReport.html beside the PS1.
