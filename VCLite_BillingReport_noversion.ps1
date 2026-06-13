@@ -120,11 +120,12 @@ function Get-SHA256Hash {
 # Sanitise a JSON string so it is safe to embed inside an HTML <script> block
 function Sanitize-Json {
     param([string]$Json)
-    # Use single-quoted replacement targets to avoid PS escape confusion
+    # Use string,string overload for ALL Replace calls.
+    # char overload cannot accept empty string and throws at runtime.
     $Json = $Json.Replace('</script>', '<\/script>')
-    $Json = $Json.Replace([char]0x2028, ' ')   # LS - line separator
-    $Json = $Json.Replace([char]0x2029, ' ')   # PS - paragraph separator
-    $Json = $Json.Replace([char]0x0000, '')    # NUL
+    $Json = $Json.Replace([string][char]0x2028, ' ')   # LS - line separator
+    $Json = $Json.Replace([string][char]0x2029, ' ')   # PS - paragraph separator
+    $Json = $Json.Replace([string][char]0x0000, '')    # NUL - remove entirely
     return $Json
 }
 
