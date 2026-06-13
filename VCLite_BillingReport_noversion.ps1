@@ -23,15 +23,20 @@ $ClientId     = "ba3e7acc-79b1-41ad-835c-90f10f4dd185"
 $ClientSecret = "a6P_9bHH2ADWbWF5VCf0TQ=="
 $TrustUrl     = "https://api-us.cloud.com/cctrustoauth2"
 $MonitorUrl   = "https://api-us.cloud.com/monitorodata"
+
+# IMPORTANT: Set this to the folder where VCLite_BillingReport.html is deployed.
+# HPSA copies the PS1 to C:\Windows\TEMP at runtime, so $MyInvocation.MyCommand.Path
+# would point to TEMP - not here. This variable pins the correct deploy location.
+$DeployDir    = "C:\Scripts\VCLite"
 # ==============================================================================
 
 # ==============================================================================
 # SCRIPT DIRECTORY & PATHS
+# Always use $DeployDir (set in SECTION 1) as the base path.
+# Do NOT use $MyInvocation.MyCommand.Path here - HPSA copies the PS1 to
+# C:\Windows\TEMP at runtime so that path would be wrong.
 # ==============================================================================
-$ScriptDir    = if ($MyInvocation.MyCommand.Path) {
-                    Split-Path $MyInvocation.MyCommand.Path -Parent
-                } else { $PWD.Path }
-
+$ScriptDir    = $DeployDir
 $TemplatePath = Join-Path $ScriptDir "VCLite_BillingReport.html"
 $OutputFolder = Join-Path $ScriptDir "output"
 
