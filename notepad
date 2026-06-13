@@ -1,16 +1,16 @@
-[2026-06-13 20:12:47][STEP] ======================================================
-[2026-06-13 20:12:47][STEP]   VCLite Citrix Billing Report
-[2026-06-13 20:12:47][STEP] ======================================================
-[2026-06-13 20:12:47][INFO] CustomerId   : ewy3n89x3jns
-[2026-06-13 20:12:47][INFO] Template     : C:\Windows\TEMP\VCLite_BillingReport.html
-[2026-06-13 20:12:47][INFO] Output dir   : C:\Windows\TEMP\output
-[2026-06-13 20:12:47][INFO] Date range   : 2026-05-01T00:00:00Z  ->  2026-05-31T23:59:59Z
-[2026-06-13 20:12:47][INFO] 
-[2026-06-13 20:12:47][STEP] [0/3] Preflight checks...
-[2026-06-13 20:12:47][OK] Output folder created: C:\Windows\TEMP\output
-[2026-06-13 20:12:47][OK] Output folder writable: C:\Windows\TEMP\output
+[2026-06-13 20:19:46][STEP] ======================================================
+[2026-06-13 20:19:46][STEP]   VCLite Citrix Billing Report
+[2026-06-13 20:19:46][STEP] ======================================================
+[2026-06-13 20:19:46][INFO] CustomerId   : ewy3n89x3jns
+[2026-06-13 20:19:46][INFO] Template     : C:\Scripts\VCLite\VCLite_BillingReport.html
+[2026-06-13 20:19:46][INFO] Output dir   : C:\Scripts\VCLite\output
+[2026-06-13 20:19:46][INFO] Date range   : 2026-05-01T00:00:00Z  ->  2026-05-31T23:59:59Z
+[2026-06-13 20:19:46][INFO] 
+[2026-06-13 20:19:46][STEP] [0/3] Preflight checks...
+[2026-06-13 20:19:46][OK] Output folder created: C:\Scripts\VCLite\output
+[2026-06-13 20:19:46][OK] Output folder writable: C:\Scripts\VCLite\output
 +============================================================+
 |        PREFLIGHT FAILED - ACTION REQUIRED                  |
 +============================================================+
-[2026-06-13 20:12:47][ERROR] [!] HTML template not found: C:\Windows\TEMP\VCLite_BillingReport.html
+[2026-06-13 20:19:46][ERROR] [!] HTML template not found: C:\Scripts\VCLite\VCLite_BillingReport.html
   Place VCLite_BillingReport.html beside the PS1.
