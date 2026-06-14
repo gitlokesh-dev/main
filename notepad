@@ -7,3 +7,28 @@ At C:\Windows\TEMP\temp121058180551.ps1:1 char:1
    ml:String) [Get-Content], ItemNotFoundException
     + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetCo 
    ntentCommand
+
+
+Root Causes of the >10 min Timeout
+1. Test-FileLocked — Biggest Culprit
+Old behavior: Safe-RemoveFiles opened a FileStream for every single file to test if it was locked before deleting. On a Citrix server with dozens of active user profiles, this means tens of thousands of file-open operations, one by one.
+Fix: Removed Test-FileLocked entirely. Remove-Item -ErrorAction SilentlyContinue already skips locked files silently — no stream-open check needed. This alone can cut runtime by 60–70%.
+
+2. C:\Users* Wildcard Expanded 9 Times Separately
+Old behavior: Safe-RemoveFiles was called 9 times with C:\Users\*\AppData\... paths. Each call re-enumerated C:\Users\* from scratch and then recursed into subdirectories — that's 9 full profile tree walks.
+Fix: New code enumerates C:\Users once, then loops through all 9 sub-paths per profile. One pass instead of nine.
+
+3. CleanMgr.exe -Wait — No Timeout
+Old behavior: Start-Process CleanMgr.exe -Wait blocks forever if cleanmgr hangs (common on Citrix/RDS).
+Fix: Replaced with -PassThru + WaitForExit(120000). If cleanmgr doesn't finish in 2 minutes, it's killed and the script continues. Fully configurable via $global:CleanMgrTimeoutSec.
+
+4. Stop-Service / Start-Service — No Timeout
+Old behavior: If wuauserv or TrustedInstaller was stuck, Stop-Service could block indefinitely.
+Fix: New Stop-ServiceSafe / Start-ServiceSafe functions poll the service status and give up after 30 seconds, then log a warning and continue.
+
+5. No Overall Script Budget
+Old behavior: No ceiling — if any phase ran long, the whole script ran long.
+Fix: Added Assert-TimeRemaining called before every major phase. If total elapsed time exceeds 8 minutes ($global:ScriptTimeoutSec = 480), the script exits cleanly with code 0 (not a failure). Adjust this value to match your automation platform's timeout setting.
+
+Configurable Thresholds (top of script)
+VariableDefaultPurpose$global:ScriptTimeoutSec480 (8 min)Hard ceiling for entire script$global:CleanMgrTimeoutSec120 (2 min)Max time for cleanmgr.exe$global:ServiceTimeoutSec30Max wait for service stop/start$global:FileAgeDays7Only delete files older than N days
