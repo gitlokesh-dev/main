@@ -11,7 +11,12 @@
 ############################################################################################################
 
 $ErrorActionPreference = "SilentlyContinue"
-$ScriptDir = (Split-Path $script:MyInvocation.MyCommand.Path) + "\"
+# Use $script:MyInvocation like citrix_audit_v6.ps1 (works with HPSA).
+# Falls back to hardcoded DeployDir if path is unavailable.
+$DeployDir = "C:\Scripts\RDL\"
+$ScriptDir = if ($script:MyInvocation.MyCommand.Path) {
+    (Split-Path $script:MyInvocation.MyCommand.Path) + "\"
+} else { $DeployDir }
 
 # ============================================================================
 # SECTION 1 - SETTINGS  (edit this block)
@@ -471,12 +476,11 @@ Write-Log "License Server: $LicenseServerFQDN"
 # ============================================================================
 # ENSURE OUTPUT FOLDER EXISTS
 # ============================================================================
-if (-not (Test-Path ($ScriptDir + "Output"))) {
-    New-Item -Path $ScriptDir -Name "Output" -ItemType Directory | Out-Null
-}
-$cDT         = Get-Date -Format "yyyyMMdd_HHmmss"
-$htmlOutputFile = $ScriptDir + "Output\UC3_RDSLicenseMonitoring_$cDT.html"
-$HashFile       = $ScriptDir + "Output\UC3_RDSLicenseMonitoring_$cDT.sha256"
+$cDT = Get-Date -Format "yyyyMMdd_HHmmss"
+$OutputDir      = $ScriptDir + "Output\"
+if (-not (Test-Path $OutputDir)) { New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null }
+$htmlOutputFile = $OutputDir + "UC3_RDSLicenseMonitoring_$cDT.html"
+$HashFile       = $OutputDir + "UC3_RDSLicenseMonitoring_$cDT.sha256"
 
 # ============================================================================
 # ALWAYS WRITE FRESH HTML TEMPLATE
@@ -737,7 +741,9 @@ Write-Log "Template : $TemplatePath"
 Write-Log "Output   : $htmlOutputFile"
 
 $HtmlContent = Get-Content -Path $TemplatePath -Raw -Encoding UTF8
-$HtmlContent = $HtmlContent -replace '</body>', "$JsonBlock`n</body>"
+# Use .Replace() not -replace because -replace is regex-based and
+# JsonBlock contains $ { } \ characters that break regex silently.
+$HtmlContent = $HtmlContent.Replace('</body>', ($JsonBlock + "`n</body>"))
 
 $HtmlContent | Out-File -FilePath $htmlOutputFile -Encoding UTF8
 Write-Log "Output report saved: $htmlOutputFile" "SUCCESS"
@@ -752,7 +758,7 @@ $hashAlgorithm.Dispose()
 
 # Back-fill SHA-256 into the saved HTML
 $HtmlContent   = [System.Text.Encoding]::UTF8.GetString($hashBytes)
-$HtmlContent   = $HtmlContent -replace '"ReportSHA256"\s*:\s*""', "`"ReportSHA256`": `"$hashValue`""
+$HtmlContent   = $HtmlContent.Replace('"ReportSHA256": ""', ('"ReportSHA256": "' + $hashValue + '"'))
 $HtmlContent   | Out-File -FilePath $htmlOutputFile -Encoding UTF8
 
 # Write .sha256 companion file
