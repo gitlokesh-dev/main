@@ -334,11 +334,6 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:13px;
 }
 .hdr-title{font-size:16px;font-weight:800;letter-spacing:-.2px;line-height:1.2}
 .hdr-sub  {font-size:10.5px;color:rgba(255,255,255,.72);margin-top:1px}
-.hdr-ver  {
-  font-size:9.5px;font-weight:700;background:rgba(255,255,255,.18);
-  color:#fff;padding:2px 8px;border-radius:9px;
-  border:1px solid rgba(255,255,255,.30);white-space:nowrap;
-}
 .hdr-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .hdr-strip{
   position:relative;z-index:1;
@@ -481,7 +476,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:13px;
   box-shadow:var(--sh-tbl);background:var(--white);
 }
 .vshead{position:sticky;top:0;z-index:10}
-.vshead table{width:100%;border-collapse:collapse;min-width:2800px}
+.vshead table{border-collapse:collapse;table-layout:fixed}
 th{
   background:var(--brand);color:#fff;
   padding:8px 10px;text-align:left;white-space:nowrap;
@@ -495,7 +490,7 @@ th:hover{background:var(--brand-dk)}
 th.sa::after{content:" ---";font-size:8px;opacity:.85}
 th.sd::after{content:" ---";font-size:8px;opacity:.85}
 th.ns{cursor:default}
-.vsbody{min-width:2800px;position:relative;background:var(--white)}
+.vsbody{position:relative;background:var(--white)}
 .vrow{display:flex;transition:background .06s}
 .vrow:hover .vc{background:var(--r-hover)!important}
 .vc{
@@ -587,7 +582,6 @@ th.ns{cursor:default}
         <div class="hdr-title">VCLite Citrix Billing Report</div>
         <div class="hdr-sub" id="hdrSub">Loading data...</div>
       </div>
-      <span class="hdr-ver">v9.4</span>
     </div>
     <div class="hdr-actions">
       <button class="btn btn-csv" id="btnCSV" onclick="doCSV()" disabled title="Download filtered data as CSV">
@@ -700,8 +694,8 @@ th.ns{cursor:default}
 <!-- ---------------------------------------------------------------------  TABLE  --------------------------------------------------------------------------------------------- -->
 <div class="t-outer">
   <div class="vwrap" id="vWrap">
-    <div class="vshead">
-      <table><thead><tr>
+    <div class="vshead" id="vsHead">
+      <table id="hdrTable"><colgroup id="hdrCols"></colgroup><thead><tr>
         <th class="ns" style="width:48px">#</th>
         <th onclick="sortBy('StartDate')">Start Date</th>
         <th onclick="sortBy('EndDate')">End Date</th>
@@ -756,7 +750,6 @@ th.ns{cursor:default}
       <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
     </svg>
     <span>VCLite Citrix Billing Report</span>
-    <span style="color:var(--text-m);font-weight:400">v9.4</span>
   </div>
   <div class="ftr-meta" id="ftrMeta">-</div>
 </footer>
@@ -765,7 +758,7 @@ th.ns{cursor:default}
 
 <script>
 /* ================================================================
-   VCLite Billing Report Engine v9.4
+   VCLite Billing Report Engine
    - No hardcoded dates - user selects date range via pickers
    - Zero-duration / equal StartDate=EndDate sessions excluded
      (both string equality AND parsed-ms comparison)
@@ -921,7 +914,28 @@ window.addEventListener("DOMContentLoaded",function(){
   document.getElementById("btnCSV").disabled=false;
   applyFilters();
   vWrap.addEventListener("scroll",renderVisible,{passive:true});
+  buildHeaderCols();
 });
+
+function buildHeaderCols(){
+  // Sync header <colgroup> widths to exactly match virtual scroll body column widths
+  var cg=document.getElementById("hdrCols");
+  if(!cg) return;
+  cg.innerHTML="";
+  // Row number column
+  var c0=document.createElement("col");
+  c0.style.width=NW+"px";
+  cg.appendChild(c0);
+  COLS.forEach(function(col){
+    var col_=document.createElement("col");
+    col_.style.width=col.w+"px";
+    cg.appendChild(col_);
+  });
+  // Ensure header table total width matches body
+  var totalW=NW+COLS.reduce(function(s,c){return s+c.w;},0);
+  var tbl=document.getElementById("hdrTable");
+  if(tbl){tbl.style.width=totalW+"px";tbl.style.minWidth=totalW+"px";}
+}
 
 /* -- Dropdowns ------------------------------------------ */
 function buildDropdowns(){
@@ -942,8 +956,11 @@ function buildDropdowns(){
 }
 
 /* -- Filter IDs ----------------------------------------- */
+// fDf and fDt excluded from active-filter count - they are pre-filled from META
+// and always have values; only count them if user changed them from META range
 var FID=["fSrch","fUN","fCo","fCi","fIS","fPl","fOS",
-         "fCa","fDG","fPr","fDf","fDt","fDurMin","fDurMax"];
+         "fCa","fDG","fPr","fDurMin","fDurMax"];
+var FID_DATE=["fDf","fDt"]; // tracked separately
 
 function applyFilters(){
   var srch=(g("fSrch").value||"").toLowerCase().trim();
@@ -957,6 +974,11 @@ function applyFilters(){
   if(dmin!==null&&isNaN(dmin))dmin=null;
   if(dmax!==null&&isNaN(dmax))dmax=null;
 
+  // Update header Range dynamically from the date pickers
+  var dispRange=(df||"...") + " -> " + (dt||"...");
+  set("hMeta-range", dispRange);
+
+  // Count active filters - date pickers only count if changed from META range
   var active=0;
   FID.forEach(function(id){
     var el=g(id); if(!el) return;
@@ -964,6 +986,15 @@ function applyFilters(){
     el.classList.toggle("act",v);
     if(v) active++;
   });
+  // Date pickers: only count as active if different from the META query range
+  var metaStart=(META.queryStart||"").substring(0,10);
+  var metaEnd=(META.queryEnd||"").substring(0,10);
+  var dfChanged=df&&df!==metaStart;
+  var dtChanged=dt&&dt!==metaEnd;
+  g("fDf").classList.toggle("act",!!dfChanged);
+  g("fDt").classList.toggle("act",!!dtChanged);
+  if(dfChanged) active++;
+  if(dtChanged) active++;
 
   var chip=document.getElementById("fChip");
   chip.className="f-chip"+(active?" on":"");
