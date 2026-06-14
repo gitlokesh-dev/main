@@ -767,78 +767,73 @@ th.ns{cursor:default}
    - CSV only (Excel removed)
 ================================================================ */
 
-/* -- Column layout --------------------------------------- */
+/* -- Column definitions ----------------------------------- */
 var COLS=[
-  {k:"StartDate",             w:148,c:""},
-  {k:"EndDate",               w:148,c:""},
-  {k:"_durLbl",               w:92, c:"dur"},
-  {k:"UserName",              w:132,c:"bold"},
-  {k:"FullName",              w:148,c:""},
-  {k:"UserUPN",               w:188,c:"mu"},
-  {k:"MachineName",           w:152,c:""},
-  {k:"MachineOS",             w:132,c:""},
-  {k:"CatalogName",           w:132,c:""},
-  {k:"DesktopGroupName",      w:148,c:""},
-  {k:"ClientPlatform",        w:102,c:"_plat"},
-  {k:"Protocol",              w:84, c:"_proto"},
-  {k:"ClientName",            w:148,c:""},
-  {k:"ClientVersion",         w:128,c:"mu"},
-  {k:"ClientIP",              w:132,c:"mono"},
-  {k:"ClientPublicIP",        w:132,c:"mono"},
-  {k:"ClientCountry",         w:112,c:""},
-  {k:"ClientCity",            w:112,c:""},
-  {k:"ClientISP",             w:168,c:""},
-  {k:"ConnectedViaHostName",  w:188,c:""},
-  {k:"ConnectedViaIPAddress", w:144,c:"mono"},
-  {k:"LaunchedViaHostName",   w:188,c:""},
-  {k:"LaunchedViaIPAddress",  w:144,c:"mono"}
+  {k:"StartDate",             w:148,cls:""},
+  {k:"EndDate",               w:148,cls:""},
+  {k:"_durLabel",             w:90, cls:"dur"},
+  {k:"UserName",              w:130,cls:"bold"},
+  {k:"FullName",              w:148,cls:""},
+  {k:"UserUPN",               w:188,cls:"mu"},
+  {k:"MachineName",           w:152,cls:""},
+  {k:"MachineOS",             w:130,cls:""},
+  {k:"CatalogName",           w:132,cls:""},
+  {k:"DesktopGroupName",      w:150,cls:""},
+  {k:"ClientPlatform",        w:100,cls:"_plat"},
+  {k:"Protocol",              w:80, cls:"_proto"},
+  {k:"ClientName",            w:148,cls:""},
+  {k:"ClientVersion",         w:125,cls:"mu"},
+  {k:"ClientIP",              w:130,cls:"mono"},
+  {k:"ClientPublicIP",        w:130,cls:"mono"},
+  {k:"ClientCountry",         w:110,cls:""},
+  {k:"ClientCity",            w:110,cls:""},
+  {k:"ClientISP",             w:168,cls:""},
+  {k:"ConnectedViaHostName",  w:185,cls:""},
+  {k:"ConnectedViaIPAddress", w:142,cls:"mono"},
+  {k:"LaunchedViaHostName",   w:185,cls:""},
+  {k:"LaunchedViaIPAddress",  w:142,cls:"mono"}
 ];
 var NW=48, RH=30;
 
-/* -- State ----------------------------------------------- */
-var RAW=[],filtered=[],META={};
+/* -- State ------------------------------------------------ */
+var ALL_ROWS=[]; // all valid rows loaded from JSON
+var filtered=[];
+var META={};
 var SKIP_TOTAL=0;
-var cur=1,psz=1000;
-var debT=null,sCol="",sAsc=true;
-var vWrap,vBody,pageRows=[];
-var TODAY=todayStr();
+var cur=1, psz=1000;
+var debT=null, sCol="", sAsc=true;
+var vWrap, vBody, pageRows=[];
+var TODAY=todayUTC();
 
-function todayStr(){
+/* TODAY is UTC date string yyyy-mm-dd matching session StartDate format */
+function todayUTC(){
   var d=new Date();
-  return d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate());
+  var y=d.getUTCFullYear();
+  var m=d.getUTCMonth()+1;
+  var day=d.getUTCDate();
+  return y+"-"+(m<10?"0"+m:m)+"-"+(day<10?"0"+day:day);
 }
 function p2(n){return n<10?"0"+n:String(n);}
 
 /* ================================================================
-   SESSION VALIDITY - mirrors PS1 Is-ValidSession exactly
-   Rule 1: StartDate missing           -> skip
-   Rule 2: EndDate missing             -> skip (still active)
-   Rule 3: StartDate >= EndDate (ms)   -> skip (zero-duration / equal)
-           Uses Date.parse() so "T09:00:00Z" vs "T09:00:00.000Z"
-           both caught. Falls back to string compare if parse fails.
-   Rule 4: StartDate date-part = today -> skip (may still run)
+   SESSION VALIDITY
+   Only excludes permanently invalid sessions (no start, no end,
+   zero-duration). TODAY check removed so all historical data shows.
+   Date RANGE filtering is done in applyFilters() so the user can
+   change the displayed range freely.
 ================================================================ */
-function isValid(r){
+function isValidSession(r){
   var sd=r.StartDate||"", ed=r.EndDate||"";
-  if(!sd||!ed) return false;                      // Rules 1 & 2
-  try{                                            // Rule 3
+  if(!sd||!ed) return false;                    // no start or end
+  try{
     var ts=Date.parse(sd), te=Date.parse(ed);
-    if(!isNaN(ts)&&!isNaN(te)){ if(ts>=te) return false; }
-    else { if(sd===ed) return false; }
+    if(!isNaN(ts)&&!isNaN(te)){ if(ts>=te) return false; } // zero/negative duration
+    else if(sd===ed) return false;
   }catch(e){ if(sd===ed) return false; }
-  if(sd.substring(0,10)===TODAY) return false;    // Rule 4
-  return true;
+  return true;  // TODAY sessions are included - date filter handles them
 }
 
-/* -- Safe JSON reader ------------------------------------ */
-function safeGet(id){
-  var el=document.getElementById(id); if(!el) return null;
-  var t=el.textContent.trim();
-  if(t.indexOf("CITRIX_")===0&&t.indexOf("PLACEHOLDER")>0) return "PH";
-  try{return JSON.parse(t);}catch(e){return null;}
-}
-
-/* -- Duration ------------------------------------------- */
+/* -- Duration --------------------------------------------- */
 function calcDur(a,b){
   if(!a||!b) return{s:0,l:""};
   try{
@@ -849,18 +844,34 @@ function calcDur(a,b){
   }catch(e){return{s:0,l:""};}
 }
 
-/* -- Init ----------------------------------------------- */
-window.addEventListener("DOMContentLoaded",function(){
-  vWrap=document.getElementById("vWrap");
-  vBody=document.getElementById("vBody");
+/* -- Safe JSON reader ------------------------------------- */
+function safeGet(id){
+  var el=document.getElementById(id);
+  if(!el) return null;
+  var t=el.textContent.trim();
+  if(t.indexOf("CITRIX_")===0&&t.indexOf("PLACEHOLDER")>0) return "PH";
+  try{return JSON.parse(t);}catch(e){return null;}
+}
 
-  var raw =safeGet("citrix-data");
-  META    =safeGet("citrix-meta")||{};
+/* -- Helpers ---------------------------------------------- */
+function g(id){return document.getElementById(id);}
+function set(id,val){var e=g(id);if(e)e.textContent=val;}
+function fmt(d){return d?d.substring(0,10):"";}
+
+/* ================================================================
+   INIT
+================================================================ */
+window.addEventListener("DOMContentLoaded",function(){
+  vWrap=g("vWrap");
+  vBody=g("vBody");
+
+  var raw=safeGet("citrix-data");
+  META=safeGet("citrix-meta")||{};
 
   if(raw==="PH"||META==="PH"){
     set("rbarTxt","No data - run VCLite_BillingReport.ps1 first.");
     set("statusPill","Template not populated");
-    set("hdrSub","Deploy PS1 + HTML + INI to server then run the PS1");
+    set("hdrSub","Deploy PS1 to server and run it.");
     return;
   }
   if(!Array.isArray(raw)){
@@ -868,156 +879,173 @@ window.addEventListener("DOMContentLoaded",function(){
     return;
   }
 
-  /* Validate and enrich */
-  SKIP_TOTAL=0; RAW=[];
+  /* Validate and enrich all rows */
+  SKIP_TOTAL=0; ALL_ROWS=[];
   raw.forEach(function(r){
-    if(!isValid(r)){SKIP_TOTAL++;return;}
+    if(!isValidSession(r)){SKIP_TOTAL++;return;}
     var d=calcDur(r.StartDate,r.EndDate);
-    r._dur=d.s; r._durLbl=d.l;
-    RAW.push(r);
+    r._dur=d.s; r._durLabel=d.l;
+    ALL_ROWS.push(r);
   });
 
-  /* Header strip */
-  var range="-";
-  if(META.queryStart&&META.queryEnd)
-    range=META.queryStart.substring(0,10)+" -> "+META.queryEnd.substring(0,10);
-  set("hMeta-range",range);
-  set("hMeta-gen",  META.generated||"-");
-  set("hMeta-rows", RAW.length.toLocaleString());
-  set("hMeta-skip", SKIP_TOTAL.toLocaleString());
-  set("hdrSub",     "Report range: "+range);
+  /* Populate header strip from META */
+  var metaFrom=fmt(META.queryStart);
+  var metaTo  =fmt(META.queryEnd);
+  set("hMeta-range", (metaFrom||"?")+" -> "+(metaTo||"?"));
+  set("hMeta-gen",   META.generated||"-");
+  set("hMeta-rows",  ALL_ROWS.length.toLocaleString());
+  set("hMeta-skip",  SKIP_TOTAL.toLocaleString());
+  set("hdrSub","Report range: "+(metaFrom||"?")+" -> "+(metaTo||"?"));
 
   /* Status pill */
-  var pill=document.getElementById("statusPill");
-  pill.textContent=RAW.length.toLocaleString()+" valid sessions";
-  pill.className="status-pill "+(RAW.length>0?"p-ok":"p-warn");
+  var pill=g("statusPill");
+  pill.textContent=ALL_ROWS.length.toLocaleString()+" valid sessions";
+  pill.className="status-pill "+(ALL_ROWS.length>0?"p-ok":"p-warn");
 
   /* Footer */
   set("ftrMeta",
-    "SHA-256: "+(META.sha256?(META.sha256.substring(0,24)+"---"):"-")
-    +"  |  Script: "+META.scriptVersion
-    +"  |  Chunk: "+(META.chunkNumber||1)+" of "+(META.totalChunks||1));
+    "SHA-256: "+(META.sha256?META.sha256.substring(0,24)+"...":"-")+
+    "  |  Chunk: "+(META.chunkNumber||1)+" of "+(META.totalChunks||1));
 
-  /* Stat cards */
+  /* Stat card - skipped */
   set("sc-skp",SKIP_TOTAL.toLocaleString());
   if(SKIP_TOTAL>0){
-    var sk=document.getElementById("rbarSkip");
-    sk.style.display="inline";
-    sk.textContent="--- "+SKIP_TOTAL.toLocaleString()+" invalid/incomplete sessions excluded";
+    var sk=g("rbarSkip");
+    if(sk){sk.style.display="inline";
+      sk.textContent=SKIP_TOTAL.toLocaleString()+" sessions skipped (zero-duration/incomplete)";}
   }
 
-  /* Populate date pickers from META (user can change freely) */
-  if(META.queryStart) document.getElementById("fDf").value=META.queryStart.substring(0,10);
-  if(META.queryEnd)   document.getElementById("fDt").value=META.queryEnd.substring(0,10);
+  /* Pre-fill date pickers from META query range */
+  if(metaFrom) g("fDf").value=metaFrom;
+  if(metaTo)   g("fDt").value=metaTo;
 
   buildDropdowns();
-  document.getElementById("btnCSV").disabled=false;
-  applyFilters();
-  vWrap.addEventListener("scroll",renderVisible,{passive:true});
   buildHeaderCols();
+  g("btnCSV").disabled=false;
+
+  /* Apply filters AFTER pickers are set - shows full META range by default */
+  applyFilters();
+
+  vWrap.addEventListener("scroll",renderVisible,{passive:true});
 });
 
+/* ================================================================
+   HEADER COLUMN SYNC
+   Sets <colgroup> widths to exactly match the virtual scroll body
+   so header and data rows are always pixel-perfectly aligned.
+================================================================ */
 function buildHeaderCols(){
-  // Sync header <colgroup> widths to exactly match virtual scroll body column widths
-  var cg=document.getElementById("hdrCols");
+  var cg=g("hdrCols");
   if(!cg) return;
   cg.innerHTML="";
-  // Row number column
+  /* row-number column */
   var c0=document.createElement("col");
   c0.style.width=NW+"px";
   cg.appendChild(c0);
+  /* data columns */
   COLS.forEach(function(col){
-    var col_=document.createElement("col");
-    col_.style.width=col.w+"px";
-    cg.appendChild(col_);
+    var cc=document.createElement("col");
+    cc.style.width=col.w+"px";
+    cg.appendChild(cc);
   });
-  // Ensure header table total width matches body
-  var totalW=NW+COLS.reduce(function(s,c){return s+c.w;},0);
-  var tbl=document.getElementById("hdrTable");
+  var totalW=NW+COLS.reduce(function(s,col){return s+col.w;},0);
+  var tbl=g("hdrTable");
   if(tbl){tbl.style.width=totalW+"px";tbl.style.minWidth=totalW+"px";}
+  /* also set vsbody min-width */
+  if(vBody){vBody.style.minWidth=totalW+"px";}
 }
 
-/* -- Dropdowns ------------------------------------------ */
+/* ================================================================
+   DROPDOWNS  - built from ALL valid data so options are always full
+================================================================ */
 function buildDropdowns(){
   var dm={fUN:"UserName",fCo:"ClientCountry",fCi:"ClientCity",
           fIS:"ClientISP",fPl:"ClientPlatform",fOS:"MachineOS",
           fCa:"CatalogName",fDG:"DesktopGroupName",fPr:"Protocol"};
   var sets={};
   Object.keys(dm).forEach(function(k){sets[k]={};});
-  RAW.forEach(function(r){
+  ALL_ROWS.forEach(function(r){
     Object.keys(dm).forEach(function(k){var v=r[dm[k]];if(v)sets[k][v]=1;});
   });
   Object.keys(sets).forEach(function(k){
-    var sel=document.getElementById(k);
+    var sel=g(k); if(!sel) return;
     Object.keys(sets[k]).sort().forEach(function(v){
       var o=document.createElement("option");o.value=v;o.textContent=v;sel.appendChild(o);
     });
   });
 }
 
-/* -- Filter IDs ----------------------------------------- */
-// fDf and fDt excluded from active-filter count - they are pre-filled from META
-// and always have values; only count them if user changed them from META range
-var FID=["fSrch","fUN","fCo","fCi","fIS","fPl","fOS",
-         "fCa","fDG","fPr","fDurMin","fDurMax"];
-var FID_DATE=["fDf","fDt"]; // tracked separately
+/* ================================================================
+   FILTERS
+   Date pickers filter the displayed rows client-side.
+   Changing the pickers immediately re-filters and updates the header.
+   Date pickers are NOT counted as "active filters" unless the user
+   has changed them away from the META query range.
+================================================================ */
+var FID_FIELDS=["fSrch","fUN","fCo","fCi","fIS","fPl","fOS","fCa","fDG","fPr","fDurMin","fDurMax"];
 
 function applyFilters(){
+  var df  =g("fDf").value||"";
+  var dt  =g("fDt").value||"";
   var srch=(g("fSrch").value||"").toLowerCase().trim();
-  var un=g("fUN").value, co=g("fCo").value, ci=g("fCi").value;
-  var isp=g("fIS").value, pl=g("fPl").value, os=g("fOS").value;
-  var ca=g("fCa").value, dg=g("fDG").value, pr=g("fPr").value;
-  var df=g("fDf").value, dt=g("fDt").value;
-  var dmn=g("fDurMin").value, dmx=g("fDurMax").value;
-  var dmin=dmn!==""?parseFloat(dmn):null;
-  var dmax=dmx!==""?parseFloat(dmx):null;
+  var un  =g("fUN").value;
+  var co  =g("fCo").value;
+  var ci  =g("fCi").value;
+  var isp =g("fIS").value;
+  var pl  =g("fPl").value;
+  var os  =g("fOS").value;
+  var ca  =g("fCa").value;
+  var dg  =g("fDG").value;
+  var pr  =g("fPr").value;
+  var dmin=g("fDurMin").value!==""?parseFloat(g("fDurMin").value):null;
+  var dmax=g("fDurMax").value!==""?parseFloat(g("fDurMax").value):null;
   if(dmin!==null&&isNaN(dmin))dmin=null;
   if(dmax!==null&&isNaN(dmax))dmax=null;
 
-  // Update header Range dynamically from the date pickers
-  var dispRange=(df||"...") + " -> " + (dt||"...");
-  set("hMeta-range", dispRange);
+  /* Update header Range: live from pickers */
+  set("hMeta-range",(df||"?")+" -> "+(dt||"?"));
 
-  // Count active filters - date pickers only count if changed from META range
+  /* Count active filters (pickers only count if changed from META range) */
   var active=0;
-  FID.forEach(function(id){
+  FID_FIELDS.forEach(function(id){
     var el=g(id); if(!el) return;
-    var v=el.value!=="";
-    el.classList.toggle("act",v);
-    if(v) active++;
+    var on=(el.tagName==="SELECT"?el.value!=="":(el.value!==""));
+    el.classList.toggle("act",on);
+    if(on) active++;
   });
-  // Date pickers: only count as active if different from the META query range
-  var metaStart=(META.queryStart||"").substring(0,10);
-  var metaEnd=(META.queryEnd||"").substring(0,10);
-  var dfChanged=df&&df!==metaStart;
-  var dtChanged=dt&&dt!==metaEnd;
-  g("fDf").classList.toggle("act",!!dfChanged);
-  g("fDt").classList.toggle("act",!!dtChanged);
-  if(dfChanged) active++;
-  if(dtChanged) active++;
+  var mf=fmt(META.queryStart), mt=fmt(META.queryEnd);
+  var dfOn=df&&df!==mf;
+  var dtOn=dt&&dt!==mt;
+  g("fDf").classList.toggle("act",!!dfOn);
+  g("fDt").classList.toggle("act",!!dtOn);
+  if(dfOn) active++;
+  if(dtOn) active++;
 
-  var chip=document.getElementById("fChip");
+  var chip=g("fChip");
   chip.className="f-chip"+(active?" on":"");
-  document.getElementById("fChipTxt").textContent=active+" filter"+(active!==1?"s":"")+" active";
-  document.getElementById("csvBadge").className="fbadge"+(active?" on":"");
+  g("fChipTxt").textContent=active+" filter"+(active!==1?"s":"")+" active";
+  g("csvBadge").className="fbadge"+(active?" on":"");
 
-  filtered=RAW.filter(function(r){
-    if(un &&r.UserName!==un)         return false;
-    if(co &&r.ClientCountry!==co)    return false;
-    if(ci &&r.ClientCity!==ci)       return false;
-    if(isp&&r.ClientISP!==isp)       return false;
-    if(pl &&r.ClientPlatform!==pl)   return false;
-    if(os &&r.MachineOS!==os)        return false;
-    if(ca &&r.CatalogName!==ca)      return false;
-    if(dg &&r.DesktopGroupName!==dg) return false;
-    if(pr &&r.Protocol!==pr)         return false;
-    if(df||dt){
-      var sd=(r.StartDate||"").substring(0,10);
-      if(df&&sd<df) return false;
-      if(dt&&sd>dt) return false;
-    }
+  /* Filter ALL_ROWS */
+  filtered=ALL_ROWS.filter(function(r){
+    /* Date range - compare yyyy-mm-dd strings (ISO sorts correctly) */
+    var sd=(r.StartDate||"").substring(0,10);
+    if(df&&sd<df) return false;
+    if(dt&&sd>dt) return false;
+    /* Field filters */
+    if(un  &&r.UserName!==un)         return false;
+    if(co  &&r.ClientCountry!==co)    return false;
+    if(ci  &&r.ClientCity!==ci)       return false;
+    if(isp &&r.ClientISP!==isp)       return false;
+    if(pl  &&r.ClientPlatform!==pl)   return false;
+    if(os  &&r.MachineOS!==os)        return false;
+    if(ca  &&r.CatalogName!==ca)      return false;
+    if(dg  &&r.DesktopGroupName!==dg) return false;
+    if(pr  &&r.Protocol!==pr)         return false;
+    /* Duration range */
     if(dmin!==null&&r._dur<dmin) return false;
     if(dmax!==null&&r._dur>dmax) return false;
+    /* Free-text search */
     if(srch){
       var h=((r.UserName||"")+(r.FullName||"")+(r.MachineName||"")+
              (r.ClientIP||"")+(r.ClientPublicIP||"")+(r.ClientName||"")+
@@ -1036,14 +1064,16 @@ function applyFilters(){
 }
 
 function resetFilters(){
-  FID.forEach(function(id){
+  FID_FIELDS.forEach(function(id){
     var el=g(id); if(!el) return;
     if(el.tagName==="SELECT") el.selectedIndex=0; else el.value="";
     el.classList.remove("act");
   });
   /* Restore pickers to META range */
-  if(META.queryStart) g("fDf").value=META.queryStart.substring(0,10);
-  if(META.queryEnd)   g("fDt").value=META.queryEnd.substring(0,10);
+  g("fDf").value=fmt(META.queryStart)||"";
+  g("fDt").value=fmt(META.queryEnd)||"";
+  g("fDf").classList.remove("act");
+  g("fDt").classList.remove("act");
   sCol=""; sAsc=true;
   document.querySelectorAll("th[onclick]").forEach(function(t){t.classList.remove("sa","sd");});
   applyFilters();
@@ -1051,17 +1081,18 @@ function resetFilters(){
 
 function debounce(){clearTimeout(debT);debT=setTimeout(applyFilters,300);}
 
-/* -- Stats ---------------------------------------------- */
+/* ================================================================
+   STATS CARDS
+================================================================ */
 function updateStats(){
-  var src=filtered;
-  set("sc-tot",src.length.toLocaleString());
+  set("sc-tot",filtered.length.toLocaleString());
   var U={},M={},C={},P={},K={},ds=0,dc=0;
-  src.forEach(function(r){
-    if(r.UserName)        U[r.UserName]=1;
-    if(r.MachineName)     M[r.MachineName]=1;
-    if(r.ClientCountry)   C[r.ClientCountry]=1;
-    if(r.ClientPlatform)  P[r.ClientPlatform]=1;
-    if(r.CatalogName)     K[r.CatalogName]=1;
+  filtered.forEach(function(r){
+    if(r.UserName)       U[r.UserName]=1;
+    if(r.MachineName)    M[r.MachineName]=1;
+    if(r.ClientCountry)  C[r.ClientCountry]=1;
+    if(r.ClientPlatform) P[r.ClientPlatform]=1;
+    if(r.CatalogName)    K[r.CatalogName]=1;
     if(r._dur>0){ds+=r._dur;dc++;}
   });
   set("sc-usr",Object.keys(U).length.toLocaleString());
@@ -1077,13 +1108,15 @@ function updateStats(){
 }
 
 function updateRbar(){
-  var tot=filtered.length,raw=RAW.length;
+  var tot=filtered.length,all=ALL_ROWS.length;
   var txt=tot.toLocaleString()+" session"+(tot!==1?"s":"");
-  if(tot<raw) txt+=" (filtered from "+raw.toLocaleString()+" valid)";
+  if(tot<all) txt+=" (filtered from "+all.toLocaleString()+" valid)";
   set("rbarTxt",txt);
 }
 
-/* -- Sort ----------------------------------------------- */
+/* ================================================================
+   SORT
+================================================================ */
 function sortBy(col){
   sCol===col?sAsc=!sAsc:(sCol=col,sAsc=true);
   document.querySelectorAll("th[onclick]").forEach(function(t){
@@ -1094,16 +1127,18 @@ function sortBy(col){
   doSort(true); goPage(1);
 }
 function doSort(rebuild){
-  var c=sCol,a=sAsc;
+  var col=sCol,asc=sAsc;
   filtered.sort(function(x,y){
-    var av=x[c]||"",bv=y[c]||"";
-    if(typeof av==="number"&&typeof bv==="number") return a?av-bv:bv-av;
-    return a?String(av).localeCompare(String(bv)):String(bv).localeCompare(String(av));
+    var a=x[col]||"",b=y[col]||"";
+    if(typeof a==="number"&&typeof b==="number") return asc?a-b:b-a;
+    return asc?String(a).localeCompare(String(b)):String(b).localeCompare(String(a));
   });
   if(rebuild) goPage(1);
 }
 
-/* -- Paging --------------------------------------------- */
+/* ================================================================
+   PAGING
+================================================================ */
 function totPages(){return Math.max(1,Math.ceil(filtered.length/psz));}
 function goPage(n){
   n=Math.max(1,Math.min(n,totPages())); cur=n;
@@ -1122,13 +1157,16 @@ function updatePager(){
   g("pgNx").disabled=cur>=tot; g("pgLa").disabled=cur>=tot;
 }
 
-/* -- Virtual scroll ------------------------------------- */
+/* ================================================================
+   VIRTUAL SCROLL
+================================================================ */
 function rebuildVS(){
-  var s=(cur-1)*psz, e=Math.min(s+psz,filtered.length);
+  var s=(cur-1)*psz,e=Math.min(s+psz,filtered.length);
   pageRows=filtered.slice(s,e);
   vBody.style.height=(pageRows.length*RH)+"px";
   vBody.style.position="relative";
-  vWrap.scrollTop=0; renderVisible();
+  vWrap.scrollTop=0;
+  renderVisible();
 }
 function renderVisible(){
   if(!pageRows.length){
@@ -1147,34 +1185,34 @@ function renderVisible(){
   vBody.querySelectorAll(".vrow[data-i]").forEach(function(el){rend[el.getAttribute("data-i")]=true;});
 
   var frag=document.createDocumentFragment();
-  var pageStart=(cur-1)*psz;
+  var base=(cur-1)*psz;
   for(var i=si;i<=ei;i++){
     if(rend[i]) continue;
     var r=pageRows[i];
     var row=document.createElement("div");
     row.className="vrow "+(i%2===0?"ev":"od");
     row.setAttribute("data-i",i);
-    row.style.cssText="position:absolute;top:"+(i*RH)+"px;left:0;right:0;height:"+RH+"px;display:flex";
+    row.style.cssText="position:absolute;top:"+(i*RH)+"px;left:0;right:0;height:"+RH+"px;display:flex;";
 
     var nc=document.createElement("div");
     nc.className="vc num"; nc.style.width=NW+"px";
-    nc.textContent=pageStart+i+1; row.appendChild(nc);
+    nc.textContent=base+i+1; row.appendChild(nc);
 
     COLS.forEach(function(col){
-      var c=document.createElement("div");
-      c.style.width=col.w+"px";
+      var cell=document.createElement("div");
+      cell.style.width=col.w+"px";
       var v=r[col.k]||"";
-      if(col.c==="_plat"){c.className="vc";c.innerHTML=platBdg(v);}
-      else if(col.c==="_proto"){c.className="vc";c.innerHTML=protoBdg(v);}
-      else{c.className="vc "+(col.c||"");c.textContent=v;if(v)c.title=v;}
-      row.appendChild(c);
+      if(col.cls==="_plat"){cell.className="vc";cell.innerHTML=platBadge(v);}
+      else if(col.cls==="_proto"){cell.className="vc";cell.innerHTML=protoBadge(v);}
+      else{cell.className="vc "+(col.cls||"");cell.textContent=v;if(v)cell.title=v;}
+      row.appendChild(cell);
     });
     frag.appendChild(row);
   }
   vBody.appendChild(frag);
 }
 
-function platBdg(v){
+function platBadge(v){
   if(!v) return"";
   var l=v.toLowerCase();
   var c=l.indexOf("win")>=0?"bw":l.indexOf("mac")>=0?"bm":
@@ -1182,79 +1220,74 @@ function platBdg(v){
         l.indexOf("and")>=0?"ba":"bo";
   return'<span class="bdg '+c+'">'+esc(v)+'</span>';
 }
-function protoBdg(v){
+function protoBadge(v){
   if(!v) return"";
   var l=v.toLowerCase();
   var c=l.indexOf("hdx")>=0?"bh":l.indexOf("rdp")>=0?"br":"bp";
   return'<span class="bdg '+c+'">'+esc(v)+'</span>';
 }
-function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
 
 /* ================================================================
-   STREAMING CSV EXPORT
-   Processes data in 10k-row chunks to avoid memory spikes on 2M+ rows.
-   Respects active filters. BOM prefix for Excel UTF-8 compatibility.
+   CSV EXPORT  - streaming, 10k rows per chunk, respects filters
 ================================================================ */
-var EH=["#","Start Date","End Date","Duration","User Name","Full Name","UPN",
+var CSV_HEADERS=["#","Start Date","End Date","Duration","User Name","Full Name","UPN",
   "Machine","OS","Catalog","Desktop Group","Platform","Protocol",
   "Client Name","Client Ver","Client IP","Public IP",
   "Country","City","ISP","Connected Via Host","Connected Via IP",
   "Launched Via Host","Launched Via IP"];
-var EK=["StartDate","EndDate","_durLbl","UserName","FullName","UserUPN",
+var CSV_KEYS=["StartDate","EndDate","_durLabel","UserName","FullName","UserUPN",
   "MachineName","MachineOS","CatalogName","DesktopGroupName","ClientPlatform","Protocol",
   "ClientName","ClientVersion","ClientIP","ClientPublicIP",
   "ClientCountry","ClientCity","ClientISP",
   "ConnectedViaHostName","ConnectedViaIPAddress","LaunchedViaHostName","LaunchedViaIPAddress"];
 
-function csvRow(arr){
-  return arr.map(function(v){
-    var s=String(v==null?"":v);
-    return(s.indexOf(",")>=0||s.indexOf('"')>=0||s.indexOf("\n")>=0)?
-      '"'+s.replace(/"/g,'""')+'"':s;
-  }).join(",");
+function csvCell(v){
+  var s=String(v==null?"":v);
+  return(s.indexOf(",")>=0||s.indexOf('"')>=0||s.indexOf("\n")>=0)?
+    '"'+s.replace(/"/g,'""')+'"':s;
 }
+function csvLine(arr){return arr.map(csvCell).join(",");}
 
 function doCSV(){
-  var btn=document.getElementById("btnCSV");
-  btn.disabled=true; showProg("Preparing CSV...");
-  var isF=filtered.length!==RAW.length;
-  var src=isF?filtered:RAW;
+  var btn=g("btnCSV"); btn.disabled=true;
+  showProg("Preparing CSV...");
+  var isFiltered=filtered.length!==ALL_ROWS.length;
+  var src=isFiltered?filtered:ALL_ROWS;
   var tot=src.length, CHUNK=10000, idx=0;
-  var parts=["\uFEFF"+csvRow(EH)+"\r\n"];
-
+  var parts=["\uFEFF"+csvLine(CSV_HEADERS)+"\r\n"];
   function pump(){
     var end=Math.min(idx+CHUNK,tot);
     for(var i=idx;i<end;i++){
       var r=src[i],row=[i+1];
-      EK.forEach(function(k){row.push(r[k]||"");});
-      parts.push(csvRow(row)+"\r\n");
+      CSV_KEYS.forEach(function(k){row.push(r[k]||"");});
+      parts.push(csvLine(row)+"\r\n");
     }
     idx=end;
     setProg(Math.round(idx/Math.max(tot,1)*95),"Writing "+idx.toLocaleString()+" / "+tot.toLocaleString()+"...");
-    if(idx<tot){ setTimeout(pump,0); return; }
-    /* All chunks done - combine and trigger download */
+    if(idx<tot){setTimeout(pump,0);return;}
     var blob=new Blob(parts,{type:"text/csv;charset=utf-8"});
     var df=g("fDf").value||"all", dt=g("fDt").value||"all";
-    var fname="VCLite_BillingReport_"+df+"_to_"+dt+(isF?"_FILTERED":"")+".csv";
-    triggerDL(blob,fname);
+    var fname="VCLite_BillingReport_"+df+"_to_"+dt+(isFiltered?"_FILTERED":"")+".csv";
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");a.href=url;a.download=fname;a.style.display="none";
+    document.body.appendChild(a);a.click();
+    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
     hideProg(); btn.disabled=false;
-    toast("CSV downloaded - "+tot.toLocaleString()+" rows"+(isF?" (filtered)":""));
+    toast("CSV downloaded: "+tot.toLocaleString()+" rows"+(isFiltered?" (filtered)":""));
   }
   setTimeout(pump,0);
 }
 
-function triggerDL(blob,name){
-  var url=URL.createObjectURL(blob);
-  var a=document.createElement("a");a.href=url;a.download=name;a.style.display="none";
-  document.body.appendChild(a);a.click();
-  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
-}
 function showProg(m){g("progArea").style.display="flex";setProg(0,m);}
 function setProg(p,m){g("progFill").style.width=p+"%";set("progTxt",m);}
 function hideProg(){g("progArea").style.display="none";setProg(0,"");}
-function toast(m){var e=g("toast");e.textContent=m;e.classList.add("on");setTimeout(function(){e.classList.remove("on");},3500);}
-function g(id){return document.getElementById(id);}
-function set(id,val){var e=g(id);if(e)e.textContent=val;}
+function toast(m){
+  var e=g("toast");e.textContent=m;e.classList.add("on");
+  setTimeout(function(){e.classList.remove("on");},3500);
+}
 </script>
 </body>
 </html>
