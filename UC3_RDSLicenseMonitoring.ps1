@@ -21,7 +21,19 @@ $ScriptDir = $DeployDir
 # ============================================================================
 # SECTION 1 - SETTINGS  (edit this block)
 # ============================================================================
-$LicenseServerFQDN    = "YOUR_RDS_LICENSE_SERVER_FQDN"   # e.g. "rdslicense.corp.com"
+# LicenseServerFQDN --- NO hardcoded value.
+# Must be passed from HPSA job parameter named "LicenseServerFQDN".
+# HPSA sets it as an environment variable which the script reads below.
+# If not supplied the script will exit with a clear error.
+if ($env:LicenseServerFQDN -and $env:LicenseServerFQDN.Trim() -ne "") {
+    $LicenseServerFQDN = $env:LicenseServerFQDN.Trim()
+} elseif (Get-Variable -Name LicenseServerFQDN -Scope Global -ErrorAction SilentlyContinue) {
+    # Already set by caller in global scope - keep it
+} else {
+    Write-Host "[ERROR] LicenseServerFQDN not supplied. Pass it as an HPSA job parameter." -ForegroundColor Red
+    Write-Output "ERROR: LicenseServerFQDN parameter is required but was not provided."
+    exit 1
+}
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
 $SessionHosts         = @()       # e.g. @("host1.corp.com","host2.corp.com")  leave @() to skip
