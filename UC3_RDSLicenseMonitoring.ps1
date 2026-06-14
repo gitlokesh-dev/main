@@ -21,16 +21,41 @@ $ScriptDir = $DeployDir
 # ============================================================================
 # SECTION 1 - SETTINGS  (edit this block)
 # ============================================================================
-# LicenseServerFQDN --- NO hardcoded value.
-# Must be passed from HPSA job parameter named "LicenseServerFQDN".
-# HPSA sets it as an environment variable which the script reads below.
-# If not supplied the script will exit with a clear error.
-if ($env:LicenseServerFQDN -and $env:LicenseServerFQDN.Trim() -ne "") {
-    $LicenseServerFQDN = $env:LicenseServerFQDN.Trim()
-} elseif (Get-Variable -Name LicenseServerFQDN -Scope Global -ErrorAction SilentlyContinue) {
-    # Already set by caller in global scope - keep it
-} else {
-    Write-Host "[ERROR] LicenseServerFQDN not supplied. Pass it as an HPSA job parameter." -ForegroundColor Red
+# LicenseServerFQDN - NO hardcoded value.
+# HPSA passes it in one of two ways - both are handled below:
+#
+#   WAY 1: HPSA job parameter (environment variable - recommended)
+#           Add job parameter: Name=LicenseServerFQDN  Value=rdslicense.corp.com
+#           HPSA sets $env:LicenseServerFQDN automatically.
+#
+#   WAY 2: HPSA command-line argument
+#           powershell.exe -ExecutionPolicy Bypass -File UC3_RDSLicenseMonitoring.ps1 -LicenseServerFQDN rdslicense.corp.com
+#           Handled via $args parsing below (no param() block needed).
+#
+# Resolution order: command-line arg > environment variable > exit with error
+
+$LicenseServerFQDN = ""
+
+# Parse -LicenseServerFQDN from $args (handles HPSA -File mode with arguments)
+for ($i = 0; $i -lt $args.Count; $i++) {
+    if ($args[$i] -match '^-LicenseServerFQDN$' -and ($i + 1) -lt $args.Count) {
+        $LicenseServerFQDN = $args[$i + 1].Trim()
+        break
+    }
+}
+
+# Fall back to environment variable if not found in args
+if (-not $LicenseServerFQDN -or $LicenseServerFQDN -eq "") {
+    if ($env:LicenseServerFQDN -and $env:LicenseServerFQDN.Trim() -ne "") {
+        $LicenseServerFQDN = $env:LicenseServerFQDN.Trim()
+    }
+}
+
+# Exit clearly if still not resolved
+if (-not $LicenseServerFQDN -or $LicenseServerFQDN -eq "") {
+    Write-Host "[ERROR] LicenseServerFQDN not supplied." -ForegroundColor Red
+    Write-Host "        Pass as HPSA job parameter OR as command-line argument:" -ForegroundColor Red
+    Write-Host "        -LicenseServerFQDN rdslicense.corp.com" -ForegroundColor Yellow
     Write-Output "ERROR: LicenseServerFQDN parameter is required but was not provided."
     exit 1
 }
