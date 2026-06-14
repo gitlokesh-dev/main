@@ -32,11 +32,17 @@ $DeployDir    = "C:\Scripts\VCLite"
 
 # ==============================================================================
 # SCRIPT DIRECTORY & PATHS
-# Always use $DeployDir (set in SECTION 1) as the base path.
-# Do NOT use $MyInvocation.MyCommand.Path here - HPSA copies the PS1 to
-# C:\Windows\TEMP at runtime so that path would be wrong.
+# Follows the same pattern as citrix_audit_v6.ps1 (the working reference):
+#   $ScriptDir = (Split-Path $script:MyInvocation.MyCommand.Path)+""
+# $script: scope ensures we get the ORIGINAL script path even when HPSA
+# copies the file to a TEMP location to execute it.
+# $DeployDir is the fallback if MyCommand.Path is unavailable.
 # ==============================================================================
-$ScriptDir    = $DeployDir
+$ScriptDir = if ($script:MyInvocation.MyCommand.Path) {
+    (Split-Path $script:MyInvocation.MyCommand.Path) + "\"
+} else {
+    $DeployDir + "\"
+}
 $TemplatePath = Join-Path $ScriptDir "VCLite_BillingReport.html"
 $OutputFolder = Join-Path $ScriptDir "output"
 
@@ -1338,7 +1344,7 @@ function Write-HtmlChunk {
     # Inject into template and save
     $html = $Template.Replace("CITRIX_DATA_PLACEHOLDER_JSON_ARRAY",  $safeJson)
     $html = $html.Replace(    "CITRIX_META_PLACEHOLDER_JSON_OBJECT", $safeMeta)
-    $html | Out-File -FilePath $path -Encoding UTF8 -NoNewline
+    $html | Out-File -FilePath $path -Encoding UTF8
 
     $rowCount = $Buffer.Count.ToString("N0")
     Write-Log "  Chunk $ChunkIndex - $rowCount rows -> $path" "OK"
@@ -1447,22 +1453,25 @@ function Export-HtmlReport {
     $totalStr = $totalRows.ToString("N0")
     Write-Log "Export complete: $totalStr rows, $skipped skipped, $($outFiles.Count) file(s)." "OK"
 
-    # Emit Base64-encoded output HTML for HPSA job-step capture.
-    # Camunda reads everything between the START/END markers, strips newlines,
-    # decodes Base64, and saves the result as the output HTML file.
-    # SHA-256 lets Camunda verify the decoded file is intact.
+    # Emit Base64-encoded HTML for HPSA/Camunda capture.
+    # Pattern matches citrix_audit_v6.ps1 exactly:
+    #   - SHA256 computed from file bytes (ReadAllBytes) not from a string
+    #   - Write-Output used (not Write-Host) so HPSA captures it on stdout
+    #   - Base64 wrapped at 76 chars per line (MIME) to avoid buffer truncation
     if ($outFiles.Count -gt 0) {
-        $lastFile   = $outFiles[$outFiles.Count - 1]
-        $lastHtml   = Get-Content -Path $lastFile -Raw -Encoding UTF8
-        $lastSha256 = Get-SHA256Hash $lastHtml
-        $lastB64    = ConvertTo-Base64Utf8 -InputString $lastHtml
+        $lastFile      = $outFiles[$outFiles.Count - 1]
+        $hashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes     = [System.IO.File]::ReadAllBytes($lastFile)
+        $lastSha256    = ([BitConverter]::ToString($hashAlgorithm.ComputeHash($hashBytes)) -replace "-", "").ToLower()
+        $hashAlgorithm.Dispose()
+        $lastHtml      = [System.Text.Encoding]::UTF8.GetString($hashBytes)
+        $lastB64       = ConvertTo-Base64Utf8 -InputString $lastHtml
 
-        # Write-Host targets stdout which HPSA job-step output captures
-        Write-Host "HPSA_REPORT_B64_START"
-        Write-Host $lastB64
-        Write-Host "HPSA_REPORT_B64_END"
-        Write-Host "HPSA_REPORT_SHA256:$lastSha256"
-        Write-Host "HPSA_REPORT_PATH:$lastFile"
+        Write-Output "HPSA_REPORT_B64_START"
+        Write-Output $lastB64
+        Write-Output "HPSA_REPORT_B64_END"
+        Write-Output "HPSA_REPORT_SHA256:$lastSha256"
+        Write-Output "HPSA_REPORT_PATH:$lastFile"
         Write-Log "HPSA Base64 emitted. SHA-256: $lastSha256" "OK"
     }
 
@@ -1518,7 +1527,7 @@ try {
                     -FileStamp  $fileStamp
 
     # Summary
-    Write-Host ""
+    Write-Host "" 
     Write-Host "+============================================================+" -ForegroundColor Green
     Write-Host "|         REPORT COMPLETE - VCLite Billing Report            |" -ForegroundColor Green
     Write-Host "+============================================================+" -ForegroundColor Green
@@ -1528,6 +1537,9 @@ try {
     Write-Host "+============================================================+" -ForegroundColor Green
     foreach ($f in $htmlFiles) { Write-Host "    $f" -ForegroundColor White }
     Write-Host ""
+    # Write-Output for HPSA stdout capture (mirrors citrix_audit_v6.ps1 pattern)
+    Write-Output "Script Completed: $(Get-Date -Format 'yyyyMMdd_HHmmss')"
+    foreach ($f in $htmlFiles) { Write-Output "HTML File : $f" }
 
     # Auto-open first report in default browser
     if ($htmlFiles.Count -gt 0) {
