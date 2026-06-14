@@ -1273,21 +1273,19 @@ function Invoke-Preflight {
     if ([string]::IsNullOrWhiteSpace($ClientId))     { $errors.Add("ClientId is empty - set it in SECTION 1.") }
     if ([string]::IsNullOrWhiteSpace($ClientSecret)) { $errors.Add("ClientSecret is empty - set it in SECTION 1.") }
 
-    # HTML template -- auto-deploy from embedded content if missing
-    if (-not (Test-Path $TemplatePath)) {
-        Write-Log "HTML template missing -- writing from embedded content: $TemplatePath" "WARN"
-        try {
-            $embeddedHtml = Get-EmbeddedTemplate
-            [System.IO.File]::WriteAllText(
-                $TemplatePath,
-                $embeddedHtml,
-                [System.Text.Encoding]::UTF8)
-            Write-Log "HTML template written successfully: $TemplatePath" "OK"
-        } catch {
-            $errors.Add("Failed to write HTML template: $($_.Exception.Message)")
-        }
-    } else {
-        Write-Log "HTML template : $TemplatePath" "OK"
+    # HTML template -- ALWAYS written fresh from embedded content.
+    # This ensures any fixes in the embedded template are immediately applied
+    # on every run, even if an old version already exists on the server.
+    Write-Log "Writing HTML template from embedded content: $TemplatePath" "INFO"
+    try {
+        $embeddedHtml = Get-EmbeddedTemplate
+        [System.IO.File]::WriteAllText(
+            $TemplatePath,
+            $embeddedHtml,
+            [System.Text.Encoding]::UTF8)
+        Write-Log "HTML template written: $TemplatePath" "OK"
+    } catch {
+        $errors.Add("Failed to write HTML template: $($_.Exception.Message)")
     }
 
     # Date range
