@@ -1,19 +1,21 @@
-#Requires -Version 5.1
 # ==============================================================================
 #  VCLite Citrix Billing Report  - LOCAL TEST BUILD
 #  Credentials : Hardcoded in SECTION 1 below (for local testing only)
 #  INI file    : NOT required
-#  Date range  : Optional parameters; defaults to previous calendar month (UTC)
+#  Date range  : Set $QueryStart and $QueryEnd below, or leave empty for
+#                previous calendar month (default)
 #  Output      : <ScriptDir>\output\VCLite_BillingReport_<stamp>.html
+#  Compatible  : Works with HPSA -Command and -File execution modes
 # ==============================================================================
 
-[CmdletBinding()]
-param(
-    [Parameter(Mandatory=$false)]
-    [string]$QueryStart = "",   # e.g. "2026-05-01T00:00:00Z"  -- defaults to start of last month
-    [Parameter(Mandatory=$false)]
-    [string]$QueryEnd   = ""    # e.g. "2026-05-31T23:59:59Z"  -- defaults to end of last month
-)
+# Date range - leave empty for automatic previous calendar month default
+# Set values here if you want a specific range e.g. "2026-05-01T00:00:00Z"
+if (-not (Get-Variable -Name QueryStart -ErrorAction SilentlyContinue)) {
+    $QueryStart = ""
+}
+if (-not (Get-Variable -Name QueryEnd -ErrorAction SilentlyContinue)) {
+    $QueryEnd = ""
+}
 
 # ==============================================================================
 # SECTION 1 - CREDENTIALS & SETTINGS  (edit this block for local testing)
