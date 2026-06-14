@@ -11,12 +11,12 @@
 ############################################################################################################
 
 $ErrorActionPreference = "SilentlyContinue"
-# Use $script:MyInvocation like citrix_audit_v6.ps1 (works with HPSA).
-# Falls back to hardcoded DeployDir if path is unavailable.
+# HPSA copies the PS1 to C:\Windows\TEMP at runtime so
+# $MyInvocation.MyCommand.Path points to TEMP - not the deploy folder.
+# Always use $DeployDir so output goes to the correct location.
+# Edit $DeployDir to match where this PS1 is deployed on the server.
 $DeployDir = "C:\Scripts\RDL\"
-$ScriptDir = if ($script:MyInvocation.MyCommand.Path) {
-    (Split-Path $script:MyInvocation.MyCommand.Path) + "\"
-} else { $DeployDir }
+$ScriptDir = $DeployDir
 
 # ============================================================================
 # SECTION 1 - SETTINGS  (edit this block)
