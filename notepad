@@ -1,18 +1,9 @@
-At C:\Windows\TEMP\temp120984920551.ps1:10 char:1
-+ [CmdletBinding()]
-+ ~~~~~~~~~~~~~~~~~
-Unexpected attribute 'CmdletBinding'.
-
-At C:\Windows\TEMP\temp120984920551.ps1:11 char:1
-+ param(
-+ ~~~~~
-Unexpected token 'param' in expression or statement.
-
-At C:\Windows\TEMP\temp120984920551.ps1:13 char:27
-+     [string]$QueryStart = "",   # e.g. "2026-05-01T00:00:00Z"  -- def ...
-+                           ~~
-The assignment expression is not valid. The input to an assignment operator 
-must be an object that is able to accept assignments, such as a variable or a 
-property.
-    + CategoryInfo          : ParserError: (:) [], ParseException
-    + FullyQualifiedErrorId : UnexpectedAttribute
+gc : Cannot find path 'C:\Windows\system32\:\Windows\TEMP\output\VCLite_Billing
+Report_20260614_164009.html' because it does not exist.
+At C:\Windows\TEMP\temp121058180551.ps1:1 char:1
++ gc :\Windows\TEMP\output\VCLite_BillingReport_20260614_164009.html
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (C:\Windows\syst...614_164009.ht 
+   ml:String) [Get-Content], ItemNotFoundException
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetCo 
+   ntentCommand
