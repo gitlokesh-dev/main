@@ -5,12 +5,18 @@
 #               generates a self-contained HTML report, emits HPSA Base64 output for Camunda.
 # Architecture: Self-contained single file.
 #               HTML template is embedded as a here-string and written to disk on every run.
-#               Output HTML is saved to <ScriptDir>\Output\ (timestamped).
-# HPSA Usage  : powershell.exe -ExecutionPolicy Bypass -File UC3_RDSLicenseMonitoring.ps1
+#               Output HTML is saved to <DeployDir>\Output\ (timestamped).
+# HPSA Usage  : powershell.exe -ExecutionPolicy Bypass -File UC3_RDSLicenseMonitoring.ps1 -LicenseServerFQDN rdslicense.corp.com
 # ExitCode    : 0=COMPLIANT  1=WARNING  2=CRITICAL
 ############################################################################################################
 
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LicenseServerFQDN        # e.g. rdslicense.corp.com  -- passed from HPSA job step
+)
+
 $ErrorActionPreference = "SilentlyContinue"
+
 # HPSA copies the PS1 to C:\Windows\TEMP at runtime so
 # $MyInvocation.MyCommand.Path points to TEMP - not the deploy folder.
 # Always use $DeployDir so output goes to the correct location.
@@ -21,44 +27,6 @@ $ScriptDir = $DeployDir
 # ============================================================================
 # SECTION 1 - SETTINGS  (edit this block)
 # ============================================================================
-# LicenseServerFQDN - NO hardcoded value.
-# HPSA passes it in one of two ways - both are handled below:
-#
-#   WAY 1: HPSA job parameter (environment variable - recommended)
-#           Add job parameter: Name=LicenseServerFQDN  Value=rdslicense.corp.com
-#           HPSA sets $env:LicenseServerFQDN automatically.
-#
-#   WAY 2: HPSA command-line argument
-#           powershell.exe -ExecutionPolicy Bypass -File UC3_RDSLicenseMonitoring.ps1 -LicenseServerFQDN rdslicense.corp.com
-#           Handled via $args parsing below (no param() block needed).
-#
-# Resolution order: command-line arg > environment variable > exit with error
-
-$LicenseServerFQDN = ""
-
-# Parse -LicenseServerFQDN from $args (handles HPSA -File mode with arguments)
-for ($i = 0; $i -lt $args.Count; $i++) {
-    if ($args[$i] -match '^-LicenseServerFQDN$' -and ($i + 1) -lt $args.Count) {
-        $LicenseServerFQDN = $args[$i + 1].Trim()
-        break
-    }
-}
-
-# Fall back to environment variable if not found in args
-if (-not $LicenseServerFQDN -or $LicenseServerFQDN -eq "") {
-    if ($env:LicenseServerFQDN -and $env:LicenseServerFQDN.Trim() -ne "") {
-        $LicenseServerFQDN = $env:LicenseServerFQDN.Trim()
-    }
-}
-
-# Exit clearly if still not resolved
-if (-not $LicenseServerFQDN -or $LicenseServerFQDN -eq "") {
-    Write-Host "[ERROR] LicenseServerFQDN not supplied." -ForegroundColor Red
-    Write-Host "        Pass as HPSA job parameter OR as command-line argument:" -ForegroundColor Red
-    Write-Host "        -LicenseServerFQDN rdslicense.corp.com" -ForegroundColor Yellow
-    Write-Output "ERROR: LicenseServerFQDN parameter is required but was not provided."
-    exit 1
-}
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
 $SessionHosts         = @()       # e.g. @("host1.corp.com","host2.corp.com")  leave @() to skip
@@ -218,18 +186,14 @@ function Get-EmbeddedTemplate {
         .ov-badge  { padding: 7px 20px; border-radius: 20px; font-weight: 800; font-size: .85rem; letter-spacing: .3px; white-space: nowrap; color: #fff; }
         .ov-detail strong { font-size: .95rem; }
         .ov-detail .sub   { font-size: .78rem; color: var(--text-m); margin-top: 2px; }
-        .card-grid { display: grid; grid-template-columns: repeat(8, 1fr) 200px; gap: 8px; margin-bottom: 16px; align-items: stretch; }
+        .card-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 16px; align-items: stretch; }
         .card { background: #fff; border-radius: var(--r-sm); padding: 10px 12px 9px; box-shadow: var(--sh); border-top: 3px solid var(--brand); position: relative; overflow: hidden; transition: transform .15s, box-shadow .15s; min-width: 0; }
         .card:hover  { transform: translateY(-2px); box-shadow: var(--sh-lg); }
         .card::after { content: attr(data-ico); position: absolute; right: 6px; top: 6px; font-size: 1.3rem; opacity: .07; }
         .card .c-lbl { font-size: .57rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-l); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card .c-val { font-size: .82rem; font-weight: 800; color: var(--text-h); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .card .c-sub { font-size: .62rem; color: var(--text-m); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .card-gauge { background: #fff; border-radius: var(--r-sm); box-shadow: var(--sh); border-top: 3px solid var(--brand); padding: 8px 10px 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: transform .15s, box-shadow .15s; }
-        .card-gauge:hover   { transform: translateY(-2px); box-shadow: var(--sh-lg); }
-        .card-gauge .cg-lbl { font-size: .57rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-l); margin-bottom: 3px; white-space: nowrap; }
-        .gauge-footer { margin-top: 2px; width: 100%; }
-        .gauge-ruler  { display: flex; justify-content: space-between; font-size: .57rem; color: var(--text-l); margin-top: 2px; }
+
         .sec { background: #fff; border-radius: var(--r); box-shadow: var(--sh); margin-bottom: 14px; overflow: hidden; border: 1px solid rgba(0,0,0,.04); }
         .sec-hdr { display: flex; align-items: center; justify-content: space-between; padding: 11px 18px; background: var(--brand); color: #fff; cursor: pointer; user-select: none; transition: background .18s; }
         .sec-hdr:hover      { background: var(--brand-dark); }
@@ -259,7 +223,7 @@ function Get-EmbeddedTemplate {
         .pf { height: 100%; border-radius: 6px; transition: width .6s ease; }
         .pp { font-weight: 700; font-size: .74rem; min-width: 36px; text-align: right; }
         code { font-family: var(--mono); font-size: .74rem; background: #F2F2F7; padding: 1px 5px; border-radius: 4px; color: #444; word-break: break-all; }
-        .rpt-footer { text-align: center; font-size: .72rem; color: var(--text-l); padding: 18px 0 28px; border-top: 1px solid var(--line); margin-top: 8px; }
+
     </style>
     <script>
         function tog(id) {
@@ -288,8 +252,8 @@ function Get-EmbeddedTemplate {
             <span>&#128220; Server: <strong id="lic-server">-</strong></span>
             <span>&#128202; CALs: <strong id="cal-summary">-</strong></span>
             <span>&#128187; Hosts: <strong id="host-count">-</strong></span>
-            <span>&#9203; Duration: <strong id="duration">-</strong></span>
-            <span>&#128295; PS: <strong id="ps-ver">-</strong></span>
+
+
         </div>
         <span class="status-pill" id="status-pill">-</span>
     </div>
@@ -312,23 +276,8 @@ function Get-EmbeddedTemplate {
         <div class="card" data-ico="&#9888;"><div class="c-lbl">Warn Threshold</div><div class="c-val" id="c-warn">-</div><div class="c-sub" id="c-warn-sub">-</div></div>
         <div class="card" data-ico="&#128308;"><div class="c-lbl">Crit Threshold</div><div class="c-val" id="c-crit">-</div><div class="c-sub" id="c-crit-sub">-</div></div>
         <div class="card" data-ico="&#128187;"><div class="c-lbl">Session Hosts</div><div class="c-val" id="c-hosts">-</div><div class="c-sub">WinRM direct</div></div>
-        <div class="card" data-ico="&#9201;"><div class="c-lbl">Script Duration</div><div class="c-val" id="c-duration">-</div></div>
-        <div class="card-gauge">
-            <div class="cg-lbl">&#128200; Live CAL Utilisation</div>
-            <div id="gauge-svg-container"></div>
-            <div class="gauge-footer">
-                <div class="pw" style="margin:0 auto;max-width:140px;">
-                    <div class="pt"><div class="pf" id="gauge-bar" style="width:0%;"></div></div>
-                    <div class="pp" id="gauge-pct">-</div>
-                </div>
-                <div class="gauge-ruler">
-                    <span>0%</span>
-                    <span id="ruler-warn" style="color:#B05E00;">v-</span>
-                    <span id="ruler-crit" style="color:#BF0E1A;">v-</span>
-                    <span>100%</span>
-                </div>
-            </div>
-        </div>
+
+
     </div>
 
     <div class="sec" id="s-kp">
@@ -346,27 +295,10 @@ function Get-EmbeddedTemplate {
         </div>
     </div>
 
-    <div class="sec" id="s-hosts">
-        <div class="sec-hdr" onclick="tog('hosts')">
-            <span class="sec-hdr-l">&#128187; Citrix Session Host Details</span>
-            <span class="sec-hdr-r"><span id="host-count-sec">-</span> host(s) <span class="chev" id="chev-hosts">&#9660;</span></span>
-        </div>
-        <div class="sec-body" id="b-hosts">
-            <div class="tbl-wrap">
-                <table>
-                    <thead><tr><th>Host Name</th><th>OS</th><th>Active</th><th>Disconnected</th><th>Total Sessions</th><th>CPU %</th><th>Mem %</th><th>Disk Free</th><th>Uptime</th><th>License Mode</th><th>Citrix VDA</th><th>DDC / Farm</th><th>Health</th><th>Duration</th></tr></thead>
-                    <tbody id="hosts-tbody"><tr><td colspan="14" style="text-align:center;padding:20px;color:#8A8A9A;">Awaiting data...</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
+
 </div>
 
-<div class="rpt-footer">
-    UC3 &mdash; RDS License Usage Monitoring &nbsp;|&nbsp; Citrix Workspace Automation Suite
-    &nbsp;|&nbsp; Generated by <strong>UC3_RDSLicenseMonitoring.ps1</strong><br>
-    <span id="footer-sha" style="font-family:'Cascadia Code','Consolas','Courier New',monospace;font-size:.65rem;color:#aaa;display:inline-block;margin-top:4px;"></span>
-</div>
+
 
 <script>
 var REPORT_DATA = null;
@@ -387,9 +319,9 @@ var REPORT_DATA = null;
     set('gen-date',    d.GenDate);
     set('lic-server',  d.LicenseServerFQDN);
     set('cal-summary', d.Issued + ' / ' + d.Installed + ' (' + d.UsagePct + '%)');
-    set('host-count',  d.HostCount);
-    set('duration',    d.ScriptDur + 's');
-    set('ps-ver',      d.PSVersion + ' (64-bit: ' + d.Is64Bit + ')');
+
+
+
     var pill = document.getElementById('status-pill');
     pill.textContent = d.Compliance + ' - ' + d.UsagePct + '% CAL Utilisation';
     pill.className   = 'status-pill ' + (pillMap[d.Compliance] || 'pill-ok');
@@ -416,14 +348,8 @@ var REPORT_DATA = null;
     set('c-crit',        d.CritPctLabel);
     set('c-crit-sub',    d.CritCardSub);
     set('c-hosts',       d.HostCount);
-    set('c-duration',    d.ScriptDur + 's');
-    document.getElementById('gauge-svg-container').innerHTML = d.GaugeSVG;
-    var bar = document.getElementById('gauge-bar');
-    bar.style.width      = Math.min(d.UsagePct, 100) + '%';
-    bar.style.background = color;
-    setStyled('gauge-pct', d.UsagePct + '%', 'color:' + color + ';');
-    set('ruler-warn', 'v' + d.WarnPctLabel);
-    set('ruler-crit', 'v' + d.CritPctLabel);
+
+
     if (d.Errors && d.Errors.length > 0) {
         var li = d.Errors.map(function(e){ return '<li>' + e + '</li>'; }).join('');
         document.getElementById('err-section').innerHTML =
@@ -450,39 +376,9 @@ var REPORT_DATA = null;
     });
     document.getElementById('kp-tbody').innerHTML = kpBody ||
         "<tr><td colspan='7' style='text-align:center;padding:20px;color:#8A8A9A;'>No key pack data available</td></tr>";
-    set('host-count-sec', d.Hosts.length);
-    var hostBody = '';
-    d.Hosts.forEach(function (h) {
-        var cpuStyle = (h.CPUPct     !== 'N/A' && parseFloat(h.CPUPct)     > 85) ? 'color:#BF0E1A;' : '';
-        var memStyle = (h.MemUsedPct !== 'N/A' && parseFloat(h.MemUsedPct) > 90) ? 'color:#BF0E1A;' : '';
-        var hBadge   = h.RowCss === 'ok'  ? 'b-ok'  : h.RowCss === 'err' ? 'b-err' : 'b-warn';
-        var vdaBadge = h.CtxVdaStatus === 'Running' ? "<span class='badge b-ok'>Running</span>"
-                     : h.CtxVdaStatus === 'N/A'     ? "<span class='badge'>N/A</span>"
-                     :                                "<span class='badge b-err'>" + h.CtxVdaStatus + "</span>";
-        hostBody +=
-            "<tr class='r-" + h.RowCss + "'>" +
-            "<td class='td-name'>" + h.VMName + "</td>" +
-            "<td>" + h.OSCaption + " (" + h.OSBuild + ")</td>" +
-            "<td style='text-align:center;font-weight:700;color:#0A7A09;'>" + h.ActiveSessions + "</td>" +
-            "<td style='text-align:center;'>" + h.DiscoSessions + "</td>" +
-            "<td style='text-align:center;font-weight:700;'>" + h.TotalSessions + "</td>" +
-            "<td style='text-align:center;" + cpuStyle + "'>" + h.CPUPct + "%</td>" +
-            "<td style='text-align:center;" + memStyle + "'>" + h.MemUsedPct + "%</td>" +
-            "<td style='text-align:center;'>" + h.DiskFreeGB + " GB</td>" +
-            "<td style='text-align:center;'>" + h.UptimeHrs + " hrs</td>" +
-            "<td>" + h.LicMode + "</td>" +
-            "<td>" + vdaBadge + "</td>" +
-            "<td style='font-size:.7rem;color:#666;'>" + h.CtxFarm + "</td>" +
-            "<td><span class='badge " + hBadge + "'>" + h.Health + "</span></td>" +
-            "<td class='td-mono'>" + h.DurationSec + "s</td>" +
-            "</tr>";
-    });
-    document.getElementById('hosts-tbody').innerHTML = hostBody ||
-        "<tr><td colspan='14' style='text-align:center;padding:20px;color:#8A8A9A;'>No host data available</td></tr>";
-    var fsha = document.getElementById('footer-sha');
-    if (fsha && d.ReportSHA256) {
-        fsha.textContent = 'SHA-256: ' + d.ReportSHA256 + '  |  Host: ' + (d.ExecutionHost || '-') + '  |  ' + (d.GenISO || '-');
-    }
+
+
+
 })();
 </script>
 </body>
@@ -715,25 +611,6 @@ $kpJsonItems = $KeyPacks | ForEach-Object {
 }
 $kpJson = '[' + ($kpJsonItems -join ',') + ']'
 
-$hostJsonItems = $HostResults | ForEach-Object {
-    '{"VMName":"'         + (EscapeJson $_.VMName)         + '",' +
-    '"OSCaption":"'       + (EscapeJson $_.OSCaption)       + '",' +
-    '"OSBuild":"'         + (EscapeJson "$($_.OSBuild)")    + '",' +
-    '"ActiveSessions":"'  + $_.ActiveSessions               + '",' +
-    '"DiscoSessions":"'   + $_.DiscoSessions                + '",' +
-    '"TotalSessions":"'   + $_.TotalSessions                + '",' +
-    '"CPUPct":"'          + $_.CPUPct                       + '",' +
-    '"MemUsedPct":"'      + $_.MemUsedPct                   + '",' +
-    '"DiskFreeGB":"'      + $_.DiskFreeGB                   + '",' +
-    '"UptimeHrs":"'       + $_.UptimeHrs                    + '",' +
-    '"LicMode":"'         + (EscapeJson $_.LicMode)         + '",' +
-    '"CtxVdaStatus":"'    + (EscapeJson $_.CtxVdaStatus)    + '",' +
-    '"CtxFarm":"'         + (EscapeJson $_.CtxFarm)         + '",' +
-    '"Health":"'          + (EscapeJson $_.Health)          + '",' +
-    '"RowCss":"'          + $_.RowCss                       + '",' +
-    '"DurationSec":"'     + $_.DurationSec                  + '"}'
-}
-$hostsJson   = '[' + ($hostJsonItems -join ',') + ']'
 $errJsonItems= $ErrorLog | ForEach-Object { '"' + (EscapeJson $_) + '"' }
 $errJson     = '[' + ($errJsonItems -join ',') + ']'
 $gaugeSvgJson= EscapeJson $GaugeSVG
@@ -759,13 +636,9 @@ var REPORT_DATA = {
   "HostCount"         : $($HostResults.Count),
   "HostDiscovery"     : "$(EscapeJson $HostDiscovery)",
   "ScriptDur"         : $ScriptDur,
-  "PSVersion"         : "$(EscapeJson $PSVersion)",
-  "Is64Bit"           : "$Is64Bit",
-  "ExecutionHost"     : "$(EscapeJson $ExecutionHost)",
-  "GaugeSVG"          : "$gaugeSvgJson",
+
   "ReportSHA256"      : "",
   "KeyPacks"          : $kpJson,
-  "Hosts"             : $hostsJson,
   "Errors"            : $errJson
 };
 </script>
