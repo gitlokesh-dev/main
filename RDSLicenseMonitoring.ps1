@@ -279,6 +279,17 @@ function renderReport() {
     set('kp-count', d.KeyPacks.length);
     var kpBody = '';
     d.KeyPacks.forEach(function (kp) {
+        if (kp.IsUnlimited) {
+            kpBody +=
+                "<tr class='r-ok'>" +
+                "<td><code>" + kp.KeyPackId + "</code></td>" +
+                "<td>" + kp.Description + "</td>" +
+                "<td>" + kp.ProductVersion + "</td>" +
+                "<td style='text-align:center;font-weight:700;' colspan='4'>" +
+                "<span class='badge b-ok'>Unlimited - excluded from totals</span></td>" +
+                "</tr>";
+            return;
+        }
         var pct    = kp.TotalLicenses > 0 ? Math.round((kp.IssuedLicenses / kp.TotalLicenses) * 1000) / 10 : 0;
         var col    = pct >= d.CritThresholdPct ? '#BF0E1A' : pct >= d.WarnThresholdPct ? '#B05E00' : '#0A7A09';
         var rowCls = pct >= d.CritThresholdPct ? 'r-err'   : pct >= d.WarnThresholdPct ? 'r-warn'  : 'r-ok';
@@ -338,27 +349,47 @@ $embeddedHtml = Get-EmbeddedTemplate
 # ============================================================================
 Write-Log "Querying license server via WMI: $LicenseServerFQDN"
 try {
-    $KeyPacks  = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" -ComputerName $LicenseServerFQDN -ErrorAction Stop)
-    $Issued    = ($KeyPacks | Measure-Object IssuedLicenses    -Sum).Sum
-    $Available = ($KeyPacks | Measure-Object AvailableLicenses -Sum).Sum
-    $Installed = ($KeyPacks | Measure-Object TotalLicenses     -Sum).Sum
-    Write-Log "WMI OK - Installed: $Installed | Issued: $Issued | Available: $Available" "SUCCESS"
+    $KeyPacks = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" -ComputerName $LicenseServerFQDN -ErrorAction Stop)
+    Write-Log "WMI query OK - $($KeyPacks.Count) key pack(s) returned" "SUCCESS"
 } catch {
     Write-Log "WMI failed ($($_.Exception.Message)), retrying via CIM..." "WARN"
     try {
-        $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $LicenseServerFQDN -SessionOption $cimOpts -ErrorAction Stop
-        $KeyPacks  = @(Get-CimInstance -CimSession $cimSess -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        $Issued    = ($KeyPacks | Measure-Object IssuedLicenses    -Sum).Sum
-        $Available = ($KeyPacks | Measure-Object AvailableLicenses -Sum).Sum
-        $Installed = ($KeyPacks | Measure-Object TotalLicenses     -Sum).Sum
+        $cimOpts  = New-CimSessionOption -Protocol Dcom
+        $cimSess  = New-CimSession -ComputerName $LicenseServerFQDN -SessionOption $cimOpts -ErrorAction Stop
+        $KeyPacks = @(Get-CimInstance -CimSession $cimSess -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
         Remove-CimSession $cimSess
-        Write-Log "CIM OK - Installed: $Installed | Issued: $Issued" "SUCCESS"
+        Write-Log "CIM query OK - $($KeyPacks.Count) key pack(s) returned" "SUCCESS"
     } catch {
         $ErrorLog.Add("License server [$LicenseServerFQDN] unreachable: $($_.Exception.Message)")
         Write-Log "License server unreachable. CAL counts will show 0." "ERROR"
     }
 }
+
+# Win32_TSLicenseKeyPack reports TotalLicenses = -1 (shown as the unsigned
+# value 4294967295 by some providers) for "unlimited" key packs - e.g.
+# built-in or temporary packs that are not capacity-limited. Summing this
+# value directly produces grossly inflated totals (the bug seen in the
+# report: Installed showing in the billions). Unlimited packs are excluded
+# from the numeric totals and flagged separately so the dashboard reflects
+# only real, finite capacity.
+$UnlimitedPackCount = 0
+$FinitePacks = @($KeyPacks | Where-Object {
+    $tl = [int64]$_.TotalLicenses
+    if ($tl -eq -1 -or $tl -eq 4294967295) {
+        $script:UnlimitedPackCount++
+        return $false
+    }
+    return $true
+})
+
+$Issued    = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object IssuedLicenses    -Sum).Sum } else { 0 }
+$Available = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object AvailableLicenses -Sum).Sum } else { 0 }
+$Installed = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object TotalLicenses     -Sum).Sum } else { 0 }
+
+if ($UnlimitedPackCount -gt 0) {
+    Write-Log "$UnlimitedPackCount unlimited key pack(s) excluded from totals (not capacity-limited)" "WARN"
+}
+Write-Log "Installed: $Installed | Issued: $Issued | Available: $Available (from $($FinitePacks.Count) finite pack(s))" "SUCCESS"
 
 $UsagePct   = if ($Installed -gt 0) { [math]::Round(($Issued / $Installed) * 100, 1) } else { 0 }
 $Compliance = if     ($UsagePct -ge $CriticalThresholdPct) { "CRITICAL"  }
@@ -380,12 +411,15 @@ $CritCardSub  = if ($UsagePct -ge $CriticalThresholdPct) { "BREACHED"    } else 
 # BUILD JSON DATA BLOCK
 # ============================================================================
 $kpJsonItems = $KeyPacks | ForEach-Object {
+    $tl = [int64]$_.TotalLicenses
+    $isUnlimited = ($tl -eq -1 -or $tl -eq 4294967295)
     '{"KeyPackId":"'         + (EscapeJson "$($_.KeyPackId)")         + '",' +
     '"Description":"'        + (EscapeJson "$($_.Description)")       + '",' +
     '"ProductVersion":"'     + (EscapeJson "$($_.ProductVersion)")    + '",' +
-    '"TotalLicenses":'       + [int]$_.TotalLicenses                  + ','  +
-    '"IssuedLicenses":'      + [int]$_.IssuedLicenses                 + ','  +
-    '"AvailableLicenses":'   + [int]$_.AvailableLicenses              + '}'
+    '"TotalLicenses":'       + $(if ($isUnlimited) { 0 } else { [int]$tl })       + ','  +
+    '"IssuedLicenses":'      + [int]$_.IssuedLicenses                            + ','  +
+    '"AvailableLicenses":'   + $(if ($isUnlimited) { 0 } else { [int]$_.AvailableLicenses }) + ','  +
+    '"IsUnlimited":'         + $(if ($isUnlimited) { "true" } else { "false" })  + '}'
 }
 $kpJson = '[' + ($kpJsonItems -join ',') + ']'
 
