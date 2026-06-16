@@ -34,17 +34,12 @@ $DeployDir    = "C:\Scripts\VCLite"
 
 # ==============================================================================
 # SCRIPT DIRECTORY & PATHS
-# Follows the same pattern as citrix_audit_v6.ps1 (the working reference):
-#   $ScriptDir = (Split-Path $script:MyInvocation.MyCommand.Path)+""
-# $script: scope ensures we get the ORIGINAL script path even when HPSA
-# copies the file to a TEMP location to execute it.
-# $DeployDir is the fallback if MyCommand.Path is unavailable.
+# HPSA copies the PS1 to C:\Windows\TEMP at runtime, so
+# $MyInvocation.MyCommand.Path points to TEMP - not the deploy folder.
+# Always use $DeployDir so the HTML template and output go to the
+# correct, consistent location regardless of how the script is executed.
 # ==============================================================================
-$ScriptDir = if ($script:MyInvocation.MyCommand.Path) {
-    (Split-Path $script:MyInvocation.MyCommand.Path) + "\"
-} else {
-    $DeployDir + "\"
-}
+$ScriptDir    = $DeployDir + "\"
 $TemplatePath = Join-Path $ScriptDir "VCLite_BillingReport.html"
 $OutputFolder = Join-Path $ScriptDir "output"
 
