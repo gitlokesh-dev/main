@@ -576,7 +576,7 @@ th.ns{cursor:default}
     <div class="hdr-strip-left">
       <span>&#128197; Range: <strong id="hMeta-range">-</strong></span>
       <span>&#128336; Generated: <strong id="hMeta-gen">-</strong></span>
-      <span>&#9989; Valid: <strong id="hMeta-rows">-</strong></span>
+      <span>&#9989; Showing: <strong id="hMeta-rows">-</strong></span>
       <span>&#9888; Skipped: <strong id="hMeta-skip">-</strong></span>
     </div>
     <span class="status-pill p-info" id="statusPill">Initialising</span>
@@ -1032,6 +1032,11 @@ function applyFilters(){
 
   if(sCol) doSort(false);
   cur=1;
+  /* Header strip "Valid" count must reflect the CURRENT filtered view,
+     not the one-time total captured at page load. Without this it stays
+     frozen at the full dataset count forever, even after changing the
+     date range and clicking Apply. */
+  set("hMeta-rows", filtered.length.toLocaleString());
   updateStats();
   updateRbar();
   goPage(1);
