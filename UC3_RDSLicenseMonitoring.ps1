@@ -214,6 +214,7 @@ function Get-EmbeddedTemplate {
             <span class="sec-hdr-r"><span id="kp-count">-</span> pack(s) <span class="chev" id="chev-kp">&#9660;</span></span>
         </div>
         <div class="sec-body" id="b-kp">
+            <div id="kp-note" style="display:none;padding:9px 18px;background:#FFF8EC;border-bottom:1px solid var(--line);font-size:.74rem;color:#6B3A00;"></div>
             <div class="tbl-wrap">
                 <table>
                     <thead><tr><th>Pack ID</th><th>Description</th><th>Product Version</th><th>Total</th><th>Issued</th><th>Available</th><th>Utilisation</th></tr></thead>
@@ -276,12 +277,33 @@ function renderReport() {
             "<div><strong>" + d.Errors.length + " error(s) during execution</strong><ul>" + li + "</ul></div></div>";
     }
     set('kp-count', d.KeyPacks.length);
+
+    /* Sort by KeyPackId (numeric where possible) so the table order is
+       stable across runs. Multiple rows can legitimately share the same
+       Description/Product Version/Total/Issued when a license server has
+       separate key packs activated under different agreements - these are
+       NOT duplicates or a rendering bug, each KeyPackId is a distinct
+       license record on the server. A note is shown when this occurs. */
+    var sortedPacks = d.KeyPacks.slice().sort(function (a, b) {
+        var an = parseInt(a.KeyPackId, 10), bn = parseInt(b.KeyPackId, 10);
+        if (!isNaN(an) && !isNaN(bn)) return an - bn;
+        return String(a.KeyPackId).localeCompare(String(b.KeyPackId));
+    });
+
+    var seenCombos = {};
+    var dupComboCount = 0;
+    sortedPacks.forEach(function (kp) {
+        var combo = kp.Description + '|' + kp.ProductVersion + '|' + kp.TotalLicenses + '|' + kp.IssuedLicenses;
+        seenCombos[combo] = (seenCombos[combo] || 0) + 1;
+    });
+    Object.keys(seenCombos).forEach(function (k) { if (seenCombos[k] > 1) dupComboCount++; });
+
     var kpBody = '';
-    d.KeyPacks.forEach(function (kp) {
+    sortedPacks.forEach(function (kp) {
         if (kp.IsUnlimited) {
             kpBody +=
                 "<tr class='r-ok'>" +
-                "<td><code>" + kp.KeyPackId + "</code></td>" +
+                "<td><code>Pack #" + kp.KeyPackId + "</code></td>" +
                 "<td>" + kp.Description + "</td>" +
                 "<td>" + kp.ProductVersion + "</td>" +
                 "<td style='text-align:center;font-weight:700;' colspan='4'>" +
@@ -294,7 +316,7 @@ function renderReport() {
         var rowCls = pct >= d.CritThresholdPct ? 'r-err'   : pct >= d.WarnThresholdPct ? 'r-warn'  : 'r-ok';
         kpBody +=
             "<tr class='" + rowCls + "'>" +
-            "<td><code>" + kp.KeyPackId + "</code></td>" +
+            "<td><code>Pack #" + kp.KeyPackId + "</code></td>" +
             "<td>" + kp.Description + "</td>" +
             "<td>" + kp.ProductVersion + "</td>" +
             "<td style='text-align:center;font-weight:700;'>" + kp.TotalLicenses + "</td>" +
@@ -306,6 +328,19 @@ function renderReport() {
     });
     document.getElementById('kp-tbody').innerHTML = kpBody ||
         "<tr><td colspan='7' style='text-align:center;padding:20px;color:#8A8A9A;'>No key pack data available</td></tr>";
+
+    var kpNote = document.getElementById('kp-note');
+    if (kpNote) {
+        if (dupComboCount > 0) {
+            kpNote.style.display = 'block';
+            kpNote.innerHTML = '&#8505; ' + dupComboCount + ' product/version group(s) below have more than one ' +
+                'key pack with matching Total/Issued counts. This is expected when a license server has separate ' +
+                'CALs activated under different agreements - each row is a distinct, real license record ' +
+                '(see the Pack # in the first column), not a duplicate or display error.';
+        } else {
+            kpNote.style.display = 'none';
+        }
+    }
 
     /* Auto-collapse the section if it has more than 10 rows - checked here
        (after the table is populated) rather than on DOMContentLoaded, since
@@ -549,6 +584,11 @@ if ($ErrorLog.Count -gt 0) {
 }
 Write-Log "=== UC3 Complete | $Compliance ($UsagePct%) ===" "SUCCESS"
 
-if     ($Compliance -eq "CRITICAL") { exit 2 }
-elseif ($Compliance -eq "WARNING")  { exit 1 }
-else                                 { exit 0 }
+# Exit code is always 0 so HPSA marks this job step as successful regardless
+# of CAL compliance state. WARNING/CRITICAL/COMPLIANT is a data finding, not
+# a script execution failure - it is communicated via the HTML report
+# (status pill, overview banner) and this console log, not the exit code.
+# If you want HPSA to branch on compliance state, parse the "=== UC3
+# Complete | <state> (<pct>%) ===" line above from the job step output
+# instead of relying on the exit code.
+exit 0
