@@ -278,25 +278,17 @@ function renderReport() {
     }
     set('kp-count', d.KeyPacks.length);
 
-    /* Sort by KeyPackId (numeric where possible) so the table order is
-       stable across runs. Multiple rows can legitimately share the same
-       Description/Product Version/Total/Issued when a license server has
-       separate key packs activated under different agreements - these are
-       NOT duplicates or a rendering bug, each KeyPackId is a distinct
-       license record on the server. A note is shown when this occurs. */
+    /* Packs are sorted by Pack ID for stable ordering. The IsDuplicate flag
+       on each pack is computed server-side (PowerShell) using the exact
+       same logic used to calculate the management totals above, so the
+       table always matches the numbers in the KPI cards. */
     var sortedPacks = d.KeyPacks.slice().sort(function (a, b) {
         var an = parseInt(a.KeyPackId, 10), bn = parseInt(b.KeyPackId, 10);
         if (!isNaN(an) && !isNaN(bn)) return an - bn;
         return String(a.KeyPackId).localeCompare(String(b.KeyPackId));
     });
 
-    var seenCombos = {};
-    var dupComboCount = 0;
-    sortedPacks.forEach(function (kp) {
-        var combo = kp.Description + '|' + kp.ProductVersion + '|' + kp.TotalLicenses + '|' + kp.IssuedLicenses;
-        seenCombos[combo] = (seenCombos[combo] || 0) + 1;
-    });
-    Object.keys(seenCombos).forEach(function (k) { if (seenCombos[k] > 1) dupComboCount++; });
+    var duplicateCount = sortedPacks.filter(function (kp) { return kp.IsDuplicate; }).length;
 
     var kpBody = '';
     sortedPacks.forEach(function (kp) {
@@ -314,6 +306,19 @@ function renderReport() {
         var pct    = kp.TotalLicenses > 0 ? Math.round((kp.IssuedLicenses / kp.TotalLicenses) * 1000) / 10 : 0;
         var col    = pct >= d.CritThresholdPct ? '#BF0E1A' : pct >= d.WarnThresholdPct ? '#B05E00' : '#0A7A09';
         var rowCls = pct >= d.CritThresholdPct ? 'r-err'   : pct >= d.WarnThresholdPct ? 'r-warn'  : 'r-ok';
+        if (kp.IsDuplicate) {
+            kpBody +=
+                "<tr class='" + rowCls + "' style='opacity:.55;'>" +
+                "<td><code>Pack #" + kp.KeyPackId + "</code></td>" +
+                "<td>" + kp.Description + "</td>" +
+                "<td>" + kp.ProductVersion + "</td>" +
+                "<td style='text-align:center;font-weight:700;'>" + kp.TotalLicenses + "</td>" +
+                "<td style='text-align:center;font-weight:700;'>" + kp.IssuedLicenses + "</td>" +
+                "<td style='text-align:center;' colspan='2'>" +
+                "<span class='badge b-warn'>Duplicate - excluded from totals</span></td>" +
+                "</tr>";
+            return;
+        }
         kpBody +=
             "<tr class='" + rowCls + "'>" +
             "<td><code>Pack #" + kp.KeyPackId + "</code></td>" +
@@ -331,12 +336,12 @@ function renderReport() {
 
     var kpNote = document.getElementById('kp-note');
     if (kpNote) {
-        if (dupComboCount > 0) {
+        if (duplicateCount > 0) {
             kpNote.style.display = 'block';
-            kpNote.innerHTML = '&#8505; ' + dupComboCount + ' product/version group(s) below have more than one ' +
-                'key pack with matching Total/Issued counts. This is expected when a license server has separate ' +
-                'CALs activated under different agreements - each row is a distinct, real license record ' +
-                '(see the Pack # in the first column), not a duplicate or display error.';
+            kpNote.innerHTML = '&#8505; ' + duplicateCount + ' key pack(s) below are exact duplicates of another pack ' +
+                '(same Description, Product Version, Total and Issued counts) and have been excluded from the ' +
+                'Total CALs / CALs In Use / CALs Available figures above to avoid double-counting the same license ' +
+                'capacity. They remain listed here, shown faded with a "Duplicate" badge, for a complete audit trail.';
         } else {
             kpNote.style.display = 'none';
         }
@@ -452,6 +457,15 @@ try {
 # report: Installed showing in the billions). Unlimited packs are excluded
 # from the numeric totals and flagged separately so the dashboard reflects
 # only real, finite capacity.
+#
+# Some license servers also return EXACT duplicate key pack entries - same
+# Description, ProductVersion, TotalLicenses, and IssuedLicenses but a
+# different KeyPackId (a known WMI quirk, often seen after a license server
+# migration or re-registration). Each such duplicate represents the SAME
+# underlying license capacity counted twice, not a separate real agreement.
+# These are deduplicated below so management-facing totals are accurate;
+# every individual Pack ID is still listed in the on-screen table for a
+# full audit trail, with duplicates visually flagged.
 try {
     $UnlimitedPackCount = 0
     $FinitePacks = @($KeyPacks | Where-Object {
@@ -463,14 +477,35 @@ try {
         return $true
     })
 
-    $Issued    = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object IssuedLicenses    -Sum).Sum } else { 0 }
-    $Available = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object AvailableLicenses -Sum).Sum } else { 0 }
-    $Installed = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object TotalLicenses     -Sum).Sum } else { 0 }
+    # Group finite packs by their license "signature" (Description + ProductVersion
+    # + TotalLicenses + IssuedLicenses). Packs sharing an identical signature are
+    # treated as duplicate WMI entries for the same license capacity - only the
+    # FIRST occurrence of each signature counts toward the management totals.
+    $SeenSignatures  = @{}
+    $DedupedPacks    = [System.Collections.Generic.List[object]]::new()
+    $DuplicatePackCount = 0
+    foreach ($pack in $FinitePacks) {
+        $sig = "$($pack.Description)|$($pack.ProductVersion)|$($pack.TotalLicenses)|$($pack.IssuedLicenses)"
+        if ($SeenSignatures.ContainsKey($sig)) {
+            $script:DuplicatePackCount++
+        } else {
+            $SeenSignatures[$sig] = $true
+            $DedupedPacks.Add($pack)
+        }
+    }
+
+    $Issued    = if ($DedupedPacks.Count -gt 0) { ($DedupedPacks | Measure-Object IssuedLicenses    -Sum).Sum } else { 0 }
+    $Available = if ($DedupedPacks.Count -gt 0) { ($DedupedPacks | Measure-Object AvailableLicenses -Sum).Sum } else { 0 }
+    $Installed = if ($DedupedPacks.Count -gt 0) { ($DedupedPacks | Measure-Object TotalLicenses     -Sum).Sum } else { 0 }
 
     if ($UnlimitedPackCount -gt 0) {
         Write-Log "$UnlimitedPackCount unlimited key pack(s) excluded from totals (not capacity-limited)" "WARN"
     }
-    Write-Log "Installed: $Installed | Issued: $Issued | Available: $Available (from $($FinitePacks.Count) finite pack(s))" "SUCCESS"
+    if ($DuplicatePackCount -gt 0) {
+        Write-Log "$DuplicatePackCount duplicate key pack(s) excluded from totals (same Description/Version/Total/Issued as another pack)" "WARN"
+        $ErrorLog.Add("$DuplicatePackCount duplicate key pack record(s) were detected and excluded from the CAL totals to avoid double-counting the same license capacity. All individual packs remain listed in the table below for audit purposes.")
+    }
+    Write-Log "Installed: $Installed | Issued: $Issued | Available: $Available (from $($DedupedPacks.Count) unique finite pack(s), $DuplicatePackCount duplicate(s) excluded)" "SUCCESS"
 } catch {
     Write-Log "Error calculating CAL totals: $($_.Exception.Message)" "ERROR"
     $ErrorLog.Add("CAL calculation failed: $($_.Exception.Message)")
@@ -507,16 +542,27 @@ try {
 # BUILD JSON DATA BLOCK
 # ============================================================================
 try {
+    $JsonSeenSignatures = @{}
     $kpJsonItems = $KeyPacks | ForEach-Object {
         $tl          = [int64]$_.TotalLicenses
         $isUnlimited = ($tl -eq -1 -or $tl -eq 4294967295)
+        $isDuplicate = $false
+        if (-not $isUnlimited) {
+            $sig = "$($_.Description)|$($_.ProductVersion)|$($_.TotalLicenses)|$($_.IssuedLicenses)"
+            if ($JsonSeenSignatures.ContainsKey($sig)) {
+                $isDuplicate = $true
+            } else {
+                $JsonSeenSignatures[$sig] = $true
+            }
+        }
         '{"KeyPackId":"'       + (EscapeJson "$($_.KeyPackId)")      + '",' +
         '"Description":"'      + (EscapeJson "$($_.Description)")    + '",' +
         '"ProductVersion":"'   + (EscapeJson "$($_.ProductVersion)") + '",' +
         '"TotalLicenses":'     + $(if ($isUnlimited) { 0 } else { [int]$tl })                       + ',' +
         '"IssuedLicenses":'    + [int]$_.IssuedLicenses                                              + ',' +
         '"AvailableLicenses":' + $(if ($isUnlimited) { 0 } else { [int]$_.AvailableLicenses })       + ',' +
-        '"IsUnlimited":'       + $(if ($isUnlimited) { "true" } else { "false" })                    + '}'
+        '"IsUnlimited":'       + $(if ($isUnlimited) { "true" } else { "false" })                    + ',' +
+        '"IsDuplicate":'       + $(if ($isDuplicate) { "true" } else { "false" })                    + '}'
     }
     $kpJson = '[' + ($kpJsonItems -join ',') + ']'
 
