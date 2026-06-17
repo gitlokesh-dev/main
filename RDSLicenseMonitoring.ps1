@@ -200,8 +200,8 @@ function Get-EmbeddedTemplate {
         </div>
     </div>
     <div class="card-grid">
-        <div class="card" data-ico="&#128220;"><div class="c-lbl">License Server</div><div class="c-val" id="c-lic-server">-</div><div class="c-sub">WMI / CIM</div></div>
-        <div class="card" data-ico="&#128202;"><div class="c-lbl">CALs Installed</div><div class="c-val" id="c-installed">-</div></div>
+        <div class="card" data-ico="&#128220;"><div class="c-lbl">License Server</div><div class="c-val" id="c-lic-server">-</div><div class="c-sub" id="c-lic-osver">-</div></div>
+        <div class="card" data-ico="&#128202;"><div class="c-lbl">Total CALs</div><div class="c-val" id="c-installed">-</div></div>
         <div class="card" data-ico="&#128273;"><div class="c-lbl">CALs In Use</div><div class="c-val" id="c-issued">-</div><div class="c-sub" id="c-issued-sub">-</div></div>
         <div class="card" data-ico="&#9989;"><div class="c-lbl">CALs Available</div><div class="c-val" id="c-available">-</div><div class="c-sub" id="c-headroom">-</div></div>
         <div class="card" data-ico="&#9888;"><div class="c-lbl">Warn Threshold</div><div class="c-val" id="c-warn">-</div><div class="c-sub" id="c-warn-sub">-</div></div>
@@ -260,6 +260,7 @@ function renderReport() {
         'Critical: <strong>' + d.CritPctLabel + '</strong> &nbsp;|&nbsp; ' +
         '', true);
     set('c-lic-server',  d.LicenseServerFQDN);
+    set('c-lic-osver',   d.LicServerOSVersion);
     set('c-installed',   d.Installed);
     setStyled('c-issued', d.Issued, 'color:' + color + ';');
     set('c-issued-sub',  d.UsagePct + '% utilisation');
@@ -365,6 +366,20 @@ try {
     }
 }
 
+# Windows version of the license server - shown on the License Server card
+$LicServerOSVersion = "N/A"
+try {
+    $osInfo = Get-WmiObject -Class "Win32_OperatingSystem" -ComputerName $LicenseServerFQDN -ErrorAction Stop
+    $LicServerOSVersion = "$($osInfo.Caption)".Trim()
+} catch {
+    try {
+        $osInfo = Get-CimInstance -ClassName "Win32_OperatingSystem" -ComputerName $LicenseServerFQDN -ErrorAction Stop
+        $LicServerOSVersion = "$($osInfo.Caption)".Trim()
+    } catch {
+        Write-Log "Could not retrieve OS version for $LicenseServerFQDN" "WARN"
+    }
+}
+
 # Win32_TSLicenseKeyPack reports TotalLicenses = -1 (shown as the unsigned
 # value 4294967295 by some providers) for "unlimited" key packs - e.g.
 # built-in or temporary packs that are not capacity-limited. Summing this
@@ -431,6 +446,7 @@ $JsonBlock = @"
 window.REPORT_DATA = {
   "GenDate"           : "$(EscapeJson $GenDate)",
   "LicenseServerFQDN" : "$(EscapeJson $LicenseServerFQDN)",
+  "LicServerOSVersion": "$(EscapeJson $LicServerOSVersion)",
   "Compliance"        : "$(EscapeJson $Compliance)",
   "UsagePct"          : $UsagePct,
   "Issued"            : $Issued,
