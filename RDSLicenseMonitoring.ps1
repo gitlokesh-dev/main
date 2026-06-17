@@ -172,11 +172,6 @@ function Get-EmbeddedTemplate {
             if (open) { b.classList.add('collapsed');    c.style.transform = 'rotate(-90deg)'; }
             else      { b.classList.remove('collapsed'); c.style.transform = 'rotate(0deg)';   }
         }
-        document.addEventListener('DOMContentLoaded', function () {
-            document.querySelectorAll('.sec-body').forEach(function (b) {
-                if (b.querySelectorAll('tbody tr').length > 10) tog(b.id.replace('b-', ''));
-            });
-        });
     </script>
 </head>
 <body>
@@ -190,7 +185,6 @@ function Get-EmbeddedTemplate {
         <div class="hdr-strip-left">
             <span>&#128220; Server: <strong id="lic-server">-</strong></span>
             <span>&#128202; CALs: <strong id="cal-summary">-</strong></span>
-
         </div>
         <span class="status-pill" id="status-pill">-</span>
     </div>
@@ -212,7 +206,6 @@ function Get-EmbeddedTemplate {
         <div class="card" data-ico="&#9989;"><div class="c-lbl">CALs Available</div><div class="c-val" id="c-available">-</div><div class="c-sub" id="c-headroom">-</div></div>
         <div class="card" data-ico="&#9888;"><div class="c-lbl">Warn Threshold</div><div class="c-val" id="c-warn">-</div><div class="c-sub" id="c-warn-sub">-</div></div>
         <div class="card" data-ico="&#128308;"><div class="c-lbl">Crit Threshold</div><div class="c-val" id="c-crit">-</div><div class="c-sub" id="c-crit-sub">-</div></div>
-
     </div>
 
     <div class="sec" id="s-kp">
@@ -263,8 +256,7 @@ function renderReport() {
     set('ov-detail-main', d.Issued + ' of ' + d.Installed + ' CALs in use (' + d.UsagePct + '%) - ' + d.Available + ' remaining');
     set('ov-detail-sub',
         'Warn: <strong>' + d.WarnPctLabel + '</strong> &nbsp;|&nbsp; ' +
-        'Critical: <strong>' + d.CritPctLabel + '</strong> &nbsp;|&nbsp; ' +
-        '', true);
+        'Critical: <strong>' + d.CritPctLabel + '</strong>', true);
     set('c-lic-server',  d.LicenseServerFQDN);
     set('c-lic-osver',   d.LicServerOSVersion);
     set('c-installed',   d.Installed);
@@ -314,6 +306,13 @@ function renderReport() {
     });
     document.getElementById('kp-tbody').innerHTML = kpBody ||
         "<tr><td colspan='7' style='text-align:center;padding:20px;color:#8A8A9A;'>No key pack data available</td></tr>";
+
+    /* Auto-collapse the section if it has more than 10 rows - checked here
+       (after the table is populated) rather than on DOMContentLoaded, since
+       at that earlier point the table only contained the placeholder row. */
+    if (d.KeyPacks.length > 10) {
+        tog('kp');
+    }
 }
 </script>
 </body>
