@@ -15,7 +15,13 @@ param(
     [string]$LicenseServerFQDN        # e.g. rdslicense.corp.com  -- passed from HPSA job step
 )
 
-$ErrorActionPreference = "SilentlyContinue"
+$ErrorActionPreference = "Continue"
+# NOTE: "SilentlyContinue" was previously used here, which suppressed every
+# error in the script - including file write failures, WMI failures, and
+# JSON build failures - with no visible trace. "Continue" lets errors print
+# to the console while still allowing the script to proceed. Each risky
+# operation below uses its own try/catch with -ErrorAction Stop so failures
+# are handled explicitly and logged, rather than disappearing silently.
 
 # HPSA copies the PS1 to C:\Windows\TEMP at runtime so
 # $MyInvocation.MyCommand.Path points to TEMP - not the deploy folder.
@@ -332,18 +338,32 @@ Write-Log "License Server: $LicenseServerFQDN"
 # ============================================================================
 # ENSURE OUTPUT FOLDER EXISTS
 # ============================================================================
-$cDT = Get-Date -Format "yyyyMMdd_HHmmss"
+$cDT            = Get-Date -Format "yyyyMMdd_HHmmss"
 $OutputDir      = $ScriptDir + "Output\"
-if (-not (Test-Path $OutputDir)) { New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null }
 $htmlOutputFile = $OutputDir + "UC3_RDSLicenseMonitoring_$cDT.html"
+
+try {
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -Path $OutputDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        Write-Log "Output folder created: $OutputDir" "SUCCESS"
+    }
+} catch {
+    Write-Log "FATAL: Could not create output folder [$OutputDir]: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 # ============================================================================
 # ALWAYS WRITE FRESH HTML TEMPLATE
 # ============================================================================
 $TemplatePath = $ScriptDir + "UC3_RDSLicenseMonitoring_Report.html"
-Write-Log "Writing HTML template: $TemplatePath"
-$embeddedHtml = Get-EmbeddedTemplate
-[System.IO.File]::WriteAllText($TemplatePath, $embeddedHtml, [System.Text.Encoding]::UTF8)
+try {
+    $embeddedHtml = Get-EmbeddedTemplate
+    [System.IO.File]::WriteAllText($TemplatePath, $embeddedHtml, [System.Text.Encoding]::UTF8)
+    Write-Log "HTML template written: $TemplatePath" "SUCCESS"
+} catch {
+    Write-Log "FATAL: Could not write HTML template [$TemplatePath]: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 # ============================================================================
 # QUERY RDS LICENSE SERVER
@@ -387,24 +407,30 @@ try {
 # report: Installed showing in the billions). Unlimited packs are excluded
 # from the numeric totals and flagged separately so the dashboard reflects
 # only real, finite capacity.
-$UnlimitedPackCount = 0
-$FinitePacks = @($KeyPacks | Where-Object {
-    $tl = [int64]$_.TotalLicenses
-    if ($tl -eq -1 -or $tl -eq 4294967295) {
-        $script:UnlimitedPackCount++
-        return $false
+try {
+    $UnlimitedPackCount = 0
+    $FinitePacks = @($KeyPacks | Where-Object {
+        $tl = [int64]$_.TotalLicenses
+        if ($tl -eq -1 -or $tl -eq 4294967295) {
+            $script:UnlimitedPackCount++
+            return $false
+        }
+        return $true
+    })
+
+    $Issued    = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object IssuedLicenses    -Sum).Sum } else { 0 }
+    $Available = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object AvailableLicenses -Sum).Sum } else { 0 }
+    $Installed = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object TotalLicenses     -Sum).Sum } else { 0 }
+
+    if ($UnlimitedPackCount -gt 0) {
+        Write-Log "$UnlimitedPackCount unlimited key pack(s) excluded from totals (not capacity-limited)" "WARN"
     }
-    return $true
-})
-
-$Issued    = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object IssuedLicenses    -Sum).Sum } else { 0 }
-$Available = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object AvailableLicenses -Sum).Sum } else { 0 }
-$Installed = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object TotalLicenses     -Sum).Sum } else { 0 }
-
-if ($UnlimitedPackCount -gt 0) {
-    Write-Log "$UnlimitedPackCount unlimited key pack(s) excluded from totals (not capacity-limited)" "WARN"
+    Write-Log "Installed: $Installed | Issued: $Issued | Available: $Available (from $($FinitePacks.Count) finite pack(s))" "SUCCESS"
+} catch {
+    Write-Log "Error calculating CAL totals: $($_.Exception.Message)" "ERROR"
+    $ErrorLog.Add("CAL calculation failed: $($_.Exception.Message)")
+    $Issued = 0; $Available = 0; $Installed = 0
 }
-Write-Log "Installed: $Installed | Issued: $Issued | Available: $Available (from $($FinitePacks.Count) finite pack(s))" "SUCCESS"
 
 $UsagePct   = if ($Installed -gt 0) { [math]::Round(($Issued / $Installed) * 100, 1) } else { 0 }
 $Compliance = if     ($UsagePct -ge $CriticalThresholdPct) { "CRITICAL"  }
@@ -415,33 +441,44 @@ Write-Log "CAL Usage: $Issued / $Installed = $UsagePct% => $Compliance"
 # ============================================================================
 # COMPUTED VARIABLES
 # ============================================================================
-$GenDate      = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
-$WarnPctLabel = "$WarningThresholdPct%"
-$CritPctLabel = "$CriticalThresholdPct%"
-$HeadroomPct  = if ($Installed -gt 0) { [math]::Round(($Available / $Installed) * 100, 1) } else { 0 }
-$WarnCardSub  = if ($UsagePct -ge $WarningThresholdPct)  { "BREACHED"    } else { "Not reached" }
-$CritCardSub  = if ($UsagePct -ge $CriticalThresholdPct) { "BREACHED"    } else { "Not reached" }
+try {
+    $GenDate      = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+    $WarnPctLabel = "$WarningThresholdPct%"
+    $CritPctLabel = "$CriticalThresholdPct%"
+    $HeadroomPct  = if ($Installed -gt 0) { [math]::Round(($Available / $Installed) * 100, 1) } else { 0 }
+    $WarnCardSub  = if ($UsagePct -ge $WarningThresholdPct)  { "BREACHED" } else { "Not reached" }
+    $CritCardSub  = if ($UsagePct -ge $CriticalThresholdPct) { "BREACHED" } else { "Not reached" }
+} catch {
+    Write-Log "Error computing derived values: $($_.Exception.Message)" "ERROR"
+    $GenDate      = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+    $WarnPctLabel = "$WarningThresholdPct%"
+    $CritPctLabel = "$CriticalThresholdPct%"
+    $HeadroomPct  = 0
+    $WarnCardSub  = "Unknown"
+    $CritCardSub  = "Unknown"
+}
 
 # ============================================================================
 # BUILD JSON DATA BLOCK
 # ============================================================================
-$kpJsonItems = $KeyPacks | ForEach-Object {
-    $tl = [int64]$_.TotalLicenses
-    $isUnlimited = ($tl -eq -1 -or $tl -eq 4294967295)
-    '{"KeyPackId":"'         + (EscapeJson "$($_.KeyPackId)")         + '",' +
-    '"Description":"'        + (EscapeJson "$($_.Description)")       + '",' +
-    '"ProductVersion":"'     + (EscapeJson "$($_.ProductVersion)")    + '",' +
-    '"TotalLicenses":'       + $(if ($isUnlimited) { 0 } else { [int]$tl })       + ','  +
-    '"IssuedLicenses":'      + [int]$_.IssuedLicenses                            + ','  +
-    '"AvailableLicenses":'   + $(if ($isUnlimited) { 0 } else { [int]$_.AvailableLicenses }) + ','  +
-    '"IsUnlimited":'         + $(if ($isUnlimited) { "true" } else { "false" })  + '}'
-}
-$kpJson = '[' + ($kpJsonItems -join ',') + ']'
+try {
+    $kpJsonItems = $KeyPacks | ForEach-Object {
+        $tl          = [int64]$_.TotalLicenses
+        $isUnlimited = ($tl -eq -1 -or $tl -eq 4294967295)
+        '{"KeyPackId":"'       + (EscapeJson "$($_.KeyPackId)")      + '",' +
+        '"Description":"'      + (EscapeJson "$($_.Description)")    + '",' +
+        '"ProductVersion":"'   + (EscapeJson "$($_.ProductVersion)") + '",' +
+        '"TotalLicenses":'     + $(if ($isUnlimited) { 0 } else { [int]$tl })                       + ',' +
+        '"IssuedLicenses":'    + [int]$_.IssuedLicenses                                              + ',' +
+        '"AvailableLicenses":' + $(if ($isUnlimited) { 0 } else { [int]$_.AvailableLicenses })       + ',' +
+        '"IsUnlimited":'       + $(if ($isUnlimited) { "true" } else { "false" })                    + '}'
+    }
+    $kpJson = '[' + ($kpJsonItems -join ',') + ']'
 
-$errJsonItems= $ErrorLog | ForEach-Object { '"' + (EscapeJson $_) + '"' }
-$errJson     = '[' + ($errJsonItems -join ',') + ']'
+    $errJsonItems = $ErrorLog | ForEach-Object { '"' + (EscapeJson $_) + '"' }
+    $errJson      = '[' + ($errJsonItems -join ',') + ']'
 
-$JsonBlock = @"
+    $JsonBlock = @"
 <script>
 window.REPORT_DATA = {
   "GenDate"           : "$(EscapeJson $GenDate)",
@@ -459,7 +496,6 @@ window.REPORT_DATA = {
   "CritThresholdPct"  : $CriticalThresholdPct,
   "WarnCardSub"       : "$(EscapeJson $WarnCardSub)",
   "CritCardSub"       : "$(EscapeJson $CritCardSub)",
-
   "KeyPacks"          : $kpJson,
   "Errors"            : $errJson
 };
@@ -470,22 +506,32 @@ if (document.readyState === "loading") {
 }
 </script>
 "@
+    Write-Log "JSON data block built successfully ($($KeyPacks.Count) key pack(s), $($ErrorLog.Count) error(s))" "SUCCESS"
+} catch {
+    Write-Log "FATAL: Could not build JSON data block: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 # ============================================================================
 # INJECT JSON INTO HTML AND SAVE OUTPUT
 # ============================================================================
-Write-Log "Template : $TemplatePath"
-Write-Log "Output   : $htmlOutputFile"
+try {
+    Write-Log "Template : $TemplatePath"
+    Write-Log "Output   : $htmlOutputFile"
 
-$HtmlContent = Get-Content -Path $TemplatePath -Raw -Encoding UTF8
-# Use .Replace() not -replace because -replace is regex-based and
-# JsonBlock contains $ { } \ characters that break regex silently.
-$HtmlContent = $HtmlContent.Replace('</body>', ($JsonBlock + "`n</body>"))
+    $HtmlContent = Get-Content -Path $TemplatePath -Raw -Encoding UTF8 -ErrorAction Stop
 
-$HtmlContent | Out-File -FilePath $htmlOutputFile -Encoding UTF8
-Write-Log "Output report saved: $htmlOutputFile" "SUCCESS"
+    # .Replace() is used instead of -replace because -replace is regex-based
+    # and JsonBlock contains $ { } \ characters that break regex silently,
+    # producing an HTML file with no data injected (REPORT_DATA stays unset).
+    $HtmlContent = $HtmlContent.Replace('</body>', ($JsonBlock + "`n</body>"))
 
-Write-Log "Output   : $htmlOutputFile" "SUCCESS"
+    $HtmlContent | Out-File -FilePath $htmlOutputFile -Encoding UTF8 -ErrorAction Stop
+    Write-Log "Output report saved: $htmlOutputFile" "SUCCESS"
+} catch {
+    Write-Log "FATAL: Could not inject data or save output report: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 Write-Log "=== UC3 Complete | $Compliance ($UsagePct%) ===" "SUCCESS"
 
