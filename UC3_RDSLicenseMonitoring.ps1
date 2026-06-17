@@ -15,7 +15,13 @@ param(
     [string]$LicenseServerFQDN        # e.g. rdslicense.corp.com  -- passed from HPSA job step
 )
 
-$ErrorActionPreference = "SilentlyContinue"
+$ErrorActionPreference = "Continue"
+# NOTE: "SilentlyContinue" was previously used here, which suppressed every
+# error in the script - including file write failures, WMI failures, and
+# JSON build failures - with no visible trace. "Continue" lets errors print
+# to the console while still allowing the script to proceed. Each risky
+# operation below uses its own try/catch with -ErrorAction Stop so failures
+# are handled explicitly and logged, rather than disappearing silently.
 
 # HPSA copies the PS1 to C:\Windows\TEMP at runtime so
 # $MyInvocation.MyCommand.Path points to TEMP - not the deploy folder.
@@ -166,11 +172,6 @@ function Get-EmbeddedTemplate {
             if (open) { b.classList.add('collapsed');    c.style.transform = 'rotate(-90deg)'; }
             else      { b.classList.remove('collapsed'); c.style.transform = 'rotate(0deg)';   }
         }
-        document.addEventListener('DOMContentLoaded', function () {
-            document.querySelectorAll('.sec-body').forEach(function (b) {
-                if (b.querySelectorAll('tbody tr').length > 10) tog(b.id.replace('b-', ''));
-            });
-        });
     </script>
 </head>
 <body>
@@ -184,7 +185,6 @@ function Get-EmbeddedTemplate {
         <div class="hdr-strip-left">
             <span>&#128220; Server: <strong id="lic-server">-</strong></span>
             <span>&#128202; CALs: <strong id="cal-summary">-</strong></span>
-
         </div>
         <span class="status-pill" id="status-pill">-</span>
     </div>
@@ -200,13 +200,12 @@ function Get-EmbeddedTemplate {
         </div>
     </div>
     <div class="card-grid">
-        <div class="card" data-ico="&#128220;"><div class="c-lbl">License Server</div><div class="c-val" id="c-lic-server">-</div><div class="c-sub">WMI / CIM</div></div>
-        <div class="card" data-ico="&#128202;"><div class="c-lbl">CALs Installed</div><div class="c-val" id="c-installed">-</div></div>
+        <div class="card" data-ico="&#128220;"><div class="c-lbl">License Server</div><div class="c-val" id="c-lic-server">-</div><div class="c-sub" id="c-lic-osver">-</div></div>
+        <div class="card" data-ico="&#128202;"><div class="c-lbl">Total CALs</div><div class="c-val" id="c-installed">-</div></div>
         <div class="card" data-ico="&#128273;"><div class="c-lbl">CALs In Use</div><div class="c-val" id="c-issued">-</div><div class="c-sub" id="c-issued-sub">-</div></div>
         <div class="card" data-ico="&#9989;"><div class="c-lbl">CALs Available</div><div class="c-val" id="c-available">-</div><div class="c-sub" id="c-headroom">-</div></div>
         <div class="card" data-ico="&#9888;"><div class="c-lbl">Warn Threshold</div><div class="c-val" id="c-warn">-</div><div class="c-sub" id="c-warn-sub">-</div></div>
         <div class="card" data-ico="&#128308;"><div class="c-lbl">Crit Threshold</div><div class="c-val" id="c-crit">-</div><div class="c-sub" id="c-crit-sub">-</div></div>
-
     </div>
 
     <div class="sec" id="s-kp">
@@ -227,10 +226,9 @@ function Get-EmbeddedTemplate {
 </div>
 
 <script>
-var REPORT_DATA = null;
-(function () {
-    if (!REPORT_DATA) return;
-    var d        = REPORT_DATA;
+function renderReport() {
+    if (!window.REPORT_DATA) return;
+    var d        = window.REPORT_DATA;
     var colorMap = { COMPLIANT: '#0A7A09', WARNING: '#B05E00', CRITICAL: '#BF0E1A' };
     var pillMap  = { COMPLIANT: 'pill-ok', WARNING: 'pill-warn', CRITICAL: 'pill-err' };
     var color    = colorMap[d.Compliance] || '#0A7A09';
@@ -258,9 +256,9 @@ var REPORT_DATA = null;
     set('ov-detail-main', d.Issued + ' of ' + d.Installed + ' CALs in use (' + d.UsagePct + '%) - ' + d.Available + ' remaining');
     set('ov-detail-sub',
         'Warn: <strong>' + d.WarnPctLabel + '</strong> &nbsp;|&nbsp; ' +
-        'Critical: <strong>' + d.CritPctLabel + '</strong> &nbsp;|&nbsp; ' +
-        '', true);
+        'Critical: <strong>' + d.CritPctLabel + '</strong>', true);
     set('c-lic-server',  d.LicenseServerFQDN);
+    set('c-lic-osver',   d.LicServerOSVersion);
     set('c-installed',   d.Installed);
     setStyled('c-issued', d.Issued, 'color:' + color + ';');
     set('c-issued-sub',  d.UsagePct + '% utilisation');
@@ -280,6 +278,17 @@ var REPORT_DATA = null;
     set('kp-count', d.KeyPacks.length);
     var kpBody = '';
     d.KeyPacks.forEach(function (kp) {
+        if (kp.IsUnlimited) {
+            kpBody +=
+                "<tr class='r-ok'>" +
+                "<td><code>" + kp.KeyPackId + "</code></td>" +
+                "<td>" + kp.Description + "</td>" +
+                "<td>" + kp.ProductVersion + "</td>" +
+                "<td style='text-align:center;font-weight:700;' colspan='4'>" +
+                "<span class='badge b-ok'>Unlimited - excluded from totals</span></td>" +
+                "</tr>";
+            return;
+        }
         var pct    = kp.TotalLicenses > 0 ? Math.round((kp.IssuedLicenses / kp.TotalLicenses) * 1000) / 10 : 0;
         var col    = pct >= d.CritThresholdPct ? '#BF0E1A' : pct >= d.WarnThresholdPct ? '#B05E00' : '#0A7A09';
         var rowCls = pct >= d.CritThresholdPct ? 'r-err'   : pct >= d.WarnThresholdPct ? 'r-warn'  : 'r-ok';
@@ -298,7 +307,13 @@ var REPORT_DATA = null;
     document.getElementById('kp-tbody').innerHTML = kpBody ||
         "<tr><td colspan='7' style='text-align:center;padding:20px;color:#8A8A9A;'>No key pack data available</td></tr>";
 
-})();
+    /* Auto-collapse the section if it has more than 10 rows - checked here
+       (after the table is populated) rather than on DOMContentLoaded, since
+       at that earlier point the table only contained the placeholder row. */
+    if (d.KeyPacks.length > 10) {
+        tog('kp');
+    }
+}
 </script>
 </body>
 </html>
@@ -322,44 +337,109 @@ Write-Log "License Server: $LicenseServerFQDN"
 # ============================================================================
 # ENSURE OUTPUT FOLDER EXISTS
 # ============================================================================
-$cDT = Get-Date -Format "yyyyMMdd_HHmmss"
+$cDT            = Get-Date -Format "yyyyMMdd_HHmmss"
 $OutputDir      = $ScriptDir + "Output\"
-if (-not (Test-Path $OutputDir)) { New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null }
 $htmlOutputFile = $OutputDir + "UC3_RDSLicenseMonitoring_$cDT.html"
+
+try {
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -Path $OutputDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        Write-Log "Output folder created: $OutputDir" "SUCCESS"
+    }
+} catch {
+    Write-Log "FATAL: Could not create output folder [$OutputDir]: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 # ============================================================================
 # ALWAYS WRITE FRESH HTML TEMPLATE
 # ============================================================================
 $TemplatePath = $ScriptDir + "UC3_RDSLicenseMonitoring_Report.html"
-Write-Log "Writing HTML template: $TemplatePath"
-$embeddedHtml = Get-EmbeddedTemplate
-[System.IO.File]::WriteAllText($TemplatePath, $embeddedHtml, [System.Text.Encoding]::UTF8)
+try {
+    $embeddedHtml = Get-EmbeddedTemplate
+    [System.IO.File]::WriteAllText($TemplatePath, $embeddedHtml, [System.Text.Encoding]::UTF8)
+    Write-Log "HTML template written: $TemplatePath" "SUCCESS"
+} catch {
+    Write-Log "FATAL: Could not write HTML template [$TemplatePath]: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 # ============================================================================
 # QUERY RDS LICENSE SERVER
 # ============================================================================
 Write-Log "Querying license server via WMI: $LicenseServerFQDN"
 try {
-    $KeyPacks  = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" -ComputerName $LicenseServerFQDN -ErrorAction Stop)
-    $Issued    = ($KeyPacks | Measure-Object IssuedLicenses    -Sum).Sum
-    $Available = ($KeyPacks | Measure-Object AvailableLicenses -Sum).Sum
-    $Installed = ($KeyPacks | Measure-Object TotalLicenses     -Sum).Sum
-    Write-Log "WMI OK - Installed: $Installed | Issued: $Issued | Available: $Available" "SUCCESS"
+    $KeyPacks = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" -ComputerName $LicenseServerFQDN -ErrorAction Stop)
+    Write-Log "WMI query OK - $($KeyPacks.Count) key pack(s) returned" "SUCCESS"
 } catch {
     Write-Log "WMI failed ($($_.Exception.Message)), retrying via CIM..." "WARN"
     try {
-        $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $LicenseServerFQDN -SessionOption $cimOpts -ErrorAction Stop
-        $KeyPacks  = @(Get-CimInstance -CimSession $cimSess -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        $Issued    = ($KeyPacks | Measure-Object IssuedLicenses    -Sum).Sum
-        $Available = ($KeyPacks | Measure-Object AvailableLicenses -Sum).Sum
-        $Installed = ($KeyPacks | Measure-Object TotalLicenses     -Sum).Sum
+        $cimOpts  = New-CimSessionOption -Protocol Dcom
+        $cimSess  = New-CimSession -ComputerName $LicenseServerFQDN -SessionOption $cimOpts -ErrorAction Stop
+        $KeyPacks = @(Get-CimInstance -CimSession $cimSess -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
         Remove-CimSession $cimSess
-        Write-Log "CIM OK - Installed: $Installed | Issued: $Issued" "SUCCESS"
+        Write-Log "CIM query OK - $($KeyPacks.Count) key pack(s) returned" "SUCCESS"
     } catch {
         $ErrorLog.Add("License server [$LicenseServerFQDN] unreachable: $($_.Exception.Message)")
         Write-Log "License server unreachable. CAL counts will show 0." "ERROR"
     }
+}
+
+# WMI/CIM can return successfully with zero rows (no exception thrown) if the
+# license server has no key packs installed, or if the query ran against the
+# wrong server/role. This is NOT caught by the try/catch above since no
+# error occurs - it must be checked explicitly so the report surfaces it
+# instead of silently showing all-zero data with no explanation.
+if ($KeyPacks.Count -eq 0) {
+    $ErrorLog.Add("Query to [$LicenseServerFQDN] returned zero license key packs. Verify this server has the RD Licensing role installed, that key packs are activated, and that the HPSA service account has WMI/CIM access to this host.")
+    Write-Log "WARNING: Zero key packs returned from $LicenseServerFQDN" "WARN"
+}
+
+# Windows version of the license server - shown on the License Server card
+$LicServerOSVersion = "N/A"
+try {
+    $osInfo = Get-WmiObject -Class "Win32_OperatingSystem" -ComputerName $LicenseServerFQDN -ErrorAction Stop
+    $LicServerOSVersion = "$($osInfo.Caption)".Trim()
+} catch {
+    try {
+        $osInfo = Get-CimInstance -ClassName "Win32_OperatingSystem" -ComputerName $LicenseServerFQDN -ErrorAction Stop
+        $LicServerOSVersion = "$($osInfo.Caption)".Trim()
+    } catch {
+        $ErrorLog.Add("Could not retrieve Windows OS version for [$LicenseServerFQDN]: $($_.Exception.Message)")
+        Write-Log "Could not retrieve OS version for $LicenseServerFQDN" "WARN"
+    }
+}
+
+# Win32_TSLicenseKeyPack reports TotalLicenses = -1 (shown as the unsigned
+# value 4294967295 by some providers) for "unlimited" key packs - e.g.
+# built-in or temporary packs that are not capacity-limited. Summing this
+# value directly produces grossly inflated totals (the bug seen in the
+# report: Installed showing in the billions). Unlimited packs are excluded
+# from the numeric totals and flagged separately so the dashboard reflects
+# only real, finite capacity.
+try {
+    $UnlimitedPackCount = 0
+    $FinitePacks = @($KeyPacks | Where-Object {
+        $tl = [int64]$_.TotalLicenses
+        if ($tl -eq -1 -or $tl -eq 4294967295) {
+            $script:UnlimitedPackCount++
+            return $false
+        }
+        return $true
+    })
+
+    $Issued    = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object IssuedLicenses    -Sum).Sum } else { 0 }
+    $Available = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object AvailableLicenses -Sum).Sum } else { 0 }
+    $Installed = if ($FinitePacks.Count -gt 0) { ($FinitePacks | Measure-Object TotalLicenses     -Sum).Sum } else { 0 }
+
+    if ($UnlimitedPackCount -gt 0) {
+        Write-Log "$UnlimitedPackCount unlimited key pack(s) excluded from totals (not capacity-limited)" "WARN"
+    }
+    Write-Log "Installed: $Installed | Issued: $Issued | Available: $Available (from $($FinitePacks.Count) finite pack(s))" "SUCCESS"
+} catch {
+    Write-Log "Error calculating CAL totals: $($_.Exception.Message)" "ERROR"
+    $ErrorLog.Add("CAL calculation failed: $($_.Exception.Message)")
+    $Issued = 0; $Available = 0; $Installed = 0
 }
 
 $UsagePct   = if ($Installed -gt 0) { [math]::Round(($Issued / $Installed) * 100, 1) } else { 0 }
@@ -371,34 +451,49 @@ Write-Log "CAL Usage: $Issued / $Installed = $UsagePct% => $Compliance"
 # ============================================================================
 # COMPUTED VARIABLES
 # ============================================================================
-$GenDate      = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
-$WarnPctLabel = "$WarningThresholdPct%"
-$CritPctLabel = "$CriticalThresholdPct%"
-$HeadroomPct  = if ($Installed -gt 0) { [math]::Round(($Available / $Installed) * 100, 1) } else { 0 }
-$WarnCardSub  = if ($UsagePct -ge $WarningThresholdPct)  { "BREACHED"    } else { "Not reached" }
-$CritCardSub  = if ($UsagePct -ge $CriticalThresholdPct) { "BREACHED"    } else { "Not reached" }
+try {
+    $GenDate      = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+    $WarnPctLabel = "$WarningThresholdPct%"
+    $CritPctLabel = "$CriticalThresholdPct%"
+    $HeadroomPct  = if ($Installed -gt 0) { [math]::Round(($Available / $Installed) * 100, 1) } else { 0 }
+    $WarnCardSub  = if ($UsagePct -ge $WarningThresholdPct)  { "BREACHED" } else { "Not reached" }
+    $CritCardSub  = if ($UsagePct -ge $CriticalThresholdPct) { "BREACHED" } else { "Not reached" }
+} catch {
+    Write-Log "Error computing derived values: $($_.Exception.Message)" "ERROR"
+    $GenDate      = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+    $WarnPctLabel = "$WarningThresholdPct%"
+    $CritPctLabel = "$CriticalThresholdPct%"
+    $HeadroomPct  = 0
+    $WarnCardSub  = "Unknown"
+    $CritCardSub  = "Unknown"
+}
 
 # ============================================================================
 # BUILD JSON DATA BLOCK
 # ============================================================================
-$kpJsonItems = $KeyPacks | ForEach-Object {
-    '{"KeyPackId":"'         + (EscapeJson "$($_.KeyPackId)")         + '",' +
-    '"Description":"'        + (EscapeJson "$($_.Description)")       + '",' +
-    '"ProductVersion":"'     + (EscapeJson "$($_.ProductVersion)")    + '",' +
-    '"TotalLicenses":'       + [int]$_.TotalLicenses                  + ','  +
-    '"IssuedLicenses":'      + [int]$_.IssuedLicenses                 + ','  +
-    '"AvailableLicenses":'   + [int]$_.AvailableLicenses              + '}'
-}
-$kpJson = '[' + ($kpJsonItems -join ',') + ']'
+try {
+    $kpJsonItems = $KeyPacks | ForEach-Object {
+        $tl          = [int64]$_.TotalLicenses
+        $isUnlimited = ($tl -eq -1 -or $tl -eq 4294967295)
+        '{"KeyPackId":"'       + (EscapeJson "$($_.KeyPackId)")      + '",' +
+        '"Description":"'      + (EscapeJson "$($_.Description)")    + '",' +
+        '"ProductVersion":"'   + (EscapeJson "$($_.ProductVersion)") + '",' +
+        '"TotalLicenses":'     + $(if ($isUnlimited) { 0 } else { [int]$tl })                       + ',' +
+        '"IssuedLicenses":'    + [int]$_.IssuedLicenses                                              + ',' +
+        '"AvailableLicenses":' + $(if ($isUnlimited) { 0 } else { [int]$_.AvailableLicenses })       + ',' +
+        '"IsUnlimited":'       + $(if ($isUnlimited) { "true" } else { "false" })                    + '}'
+    }
+    $kpJson = '[' + ($kpJsonItems -join ',') + ']'
 
-$errJsonItems= $ErrorLog | ForEach-Object { '"' + (EscapeJson $_) + '"' }
-$errJson     = '[' + ($errJsonItems -join ',') + ']'
+    $errJsonItems = $ErrorLog | ForEach-Object { '"' + (EscapeJson $_) + '"' }
+    $errJson      = '[' + ($errJsonItems -join ',') + ']'
 
-$JsonBlock = @"
+    $JsonBlock = @"
 <script>
-var REPORT_DATA = {
+window.REPORT_DATA = {
   "GenDate"           : "$(EscapeJson $GenDate)",
   "LicenseServerFQDN" : "$(EscapeJson $LicenseServerFQDN)",
+  "LicServerOSVersion": "$(EscapeJson $LicServerOSVersion)",
   "Compliance"        : "$(EscapeJson $Compliance)",
   "UsagePct"          : $UsagePct,
   "Issued"            : $Issued,
@@ -411,29 +506,47 @@ var REPORT_DATA = {
   "CritThresholdPct"  : $CriticalThresholdPct,
   "WarnCardSub"       : "$(EscapeJson $WarnCardSub)",
   "CritCardSub"       : "$(EscapeJson $CritCardSub)",
-
   "KeyPacks"          : $kpJson,
   "Errors"            : $errJson
 };
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", renderReport);
+} else {
+  renderReport();
+}
 </script>
 "@
+    Write-Log "JSON data block built successfully ($($KeyPacks.Count) key pack(s), $($ErrorLog.Count) error(s))" "SUCCESS"
+} catch {
+    Write-Log "FATAL: Could not build JSON data block: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
 # ============================================================================
 # INJECT JSON INTO HTML AND SAVE OUTPUT
 # ============================================================================
-Write-Log "Template : $TemplatePath"
-Write-Log "Output   : $htmlOutputFile"
+try {
+    Write-Log "Template : $TemplatePath"
+    Write-Log "Output   : $htmlOutputFile"
 
-$HtmlContent = Get-Content -Path $TemplatePath -Raw -Encoding UTF8
-# Use .Replace() not -replace because -replace is regex-based and
-# JsonBlock contains $ { } \ characters that break regex silently.
-$HtmlContent = $HtmlContent.Replace('</body>', ($JsonBlock + "`n</body>"))
+    $HtmlContent = Get-Content -Path $TemplatePath -Raw -Encoding UTF8 -ErrorAction Stop
 
-$HtmlContent | Out-File -FilePath $htmlOutputFile -Encoding UTF8
-Write-Log "Output report saved: $htmlOutputFile" "SUCCESS"
+    # .Replace() is used instead of -replace because -replace is regex-based
+    # and JsonBlock contains $ { } \ characters that break regex silently,
+    # producing an HTML file with no data injected (REPORT_DATA stays unset).
+    $HtmlContent = $HtmlContent.Replace('</body>', ($JsonBlock + "`n</body>"))
 
-Write-Log "Output   : $htmlOutputFile" "SUCCESS"
+    $HtmlContent | Out-File -FilePath $htmlOutputFile -Encoding UTF8 -ErrorAction Stop
+    Write-Log "Output report saved: $htmlOutputFile" "SUCCESS"
+} catch {
+    Write-Log "FATAL: Could not inject data or save output report: $($_.Exception.Message)" "ERROR"
+    exit 3
+}
 
+if ($ErrorLog.Count -gt 0) {
+    Write-Log "$($ErrorLog.Count) error(s)/warning(s) were captured and are shown in the HTML report:" "WARN"
+    foreach ($e in $ErrorLog) { Write-Log "  - $e" "WARN" }
+}
 Write-Log "=== UC3 Complete | $Compliance ($UsagePct%) ===" "SUCCESS"
 
 if     ($Compliance -eq "CRITICAL") { exit 2 }
