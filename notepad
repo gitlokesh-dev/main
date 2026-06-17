@@ -256,7 +256,7 @@ var REPORT_DATA = null;
 <script>
 var REPORT_DATA = {
   "GenDate"           : "Wednesday, 17 June 2026 09:28:39",
-  "LicenseServerFQDN" : "amsdc1-s-7060.europe.shell.com",
+  "LicenseServerFQDN" : "test.com",
   "Compliance"        : "COMPLIANT",
   "UsagePct"          : 0,
   "Issued"            : 41838,
