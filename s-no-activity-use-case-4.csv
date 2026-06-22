@@ -1,0 +1,21 @@
+﻿S.No,Activity / Use Case,Objective – 5 Steps,Effort / Time Saved,Resources Required,Priority,Complexity,Business Value
+9,Automatic Cleanup Drives,"1. Identify cleanup scope
+2. Schedule cleanup tasks
+3. Automate file deletion
+4. Monitor drive usage
+5. Generate reports",~3–4 hrs/month,"Automation scripts, monitoring tool",High,Low–Medium,"High – avoids downtime, improves performance"
+10,CPU Utilization Monitoring,"1. Define monitoring parameters
+2. Deploy monitoring tool
+3. Collect utilization data
+4. Analyze bottlenecks
+5. Enable proactive scaling",~5–6 hrs/month,"Monitoring software, dashboards",High,Medium,"High – prevents bottlenecks, supports scaling"
+16,VC Desktop Upgrades,"1. Plan upgrade cycle
+2. Automate upgrade deployment
+3. Validate compatibility
+4. Monitor upgrade success
+5. Document upgrade logs",~8–10 hrs/quarter,Upgrade automation tools,Medium,Medium–High,"High – reduces downtime, enhances user experience"
+18,Unused VDI Deletion,"1. Identify inactive VDIs
+2. Validate inactivity
+3. Automate deletion
+4. Reclaim resources
+5. Generate efficiency reports",~6–8 hrs/month,"Automation scripts, storage monitoring",High,Medium,"High – reduces costs, optimizes utilization"
