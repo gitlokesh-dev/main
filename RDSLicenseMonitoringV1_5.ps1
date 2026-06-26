@@ -1,7 +1,7 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-# Version      : V1.5.1
+# Version      : V1.5.2
 # Compatibility: PowerShell 5.1+  |  Windows Server 2016 / 2019 / 2022
 #
 # USAGE
@@ -14,6 +14,14 @@
 #
 # CHANGE LOG
 # ----------
+#  V1.5.2 (2026-06-27)  BUG FIX -- Mandatory $ErrorLog binding error
+#        [Parameter(Mandatory)] on $ErrorLog in Get-KeyPacks and Get-OSVersion
+#        caused PowerShell's parameter binder to reject a valid (but empty)
+#        List[string] with "Cannot bind argument to parameter 'ErrorLog' because
+#        it is an empty collection."  $ErrorLog is an output-collector passed by
+#        the caller -- it must never be Mandatory.  Removed [Parameter(Mandatory)]
+#        from $ErrorLog in both functions; [Parameter(Mandatory)] kept on $Server.
+#
 #  V1.5.1 (2026-05-28)  PARSE ERROR FIX
 #        $function:Write-Log syntax fails at parse time when the function name
 #        contains a hyphen -- PowerShell's variable namespace syntax does not
@@ -64,7 +72,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.5.1"
+$ScriptVersion        = "V1.5.2"
 #endregion CONFIG
 
 
@@ -726,7 +734,7 @@ window.COMBINED_DATA = {
 function Get-KeyPacks {
     param(
         [Parameter(Mandatory)][string]$Server,
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$ErrorLog
+        [System.Collections.Generic.List[string]]$ErrorLog
     )
 
     # Attempt 1: WMI (fastest path) ──────────────────────────────────────────
@@ -769,7 +777,7 @@ function Get-KeyPacks {
 function Get-OSVersion {
     param(
         [Parameter(Mandatory)][string]$Server,
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$ErrorLog
+        [System.Collections.Generic.List[string]]$ErrorLog
     )
 
     # Attempt 1: WMI ─────────────────────────────────────────────────────────
