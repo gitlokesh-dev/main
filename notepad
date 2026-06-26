@@ -1,53 +1,16 @@
-At C:\Windows\TEMP\temp123598210551.ps1:912 char:46
-+                 WriteLog    = $function:Write-Log.ToString()
-+                                              ~~~~
-Unexpected token '-Log' in expression or statement.
+[2026-06-26 22:16:15][INFO] =================================================================
+[2026-06-26 22:16:15][INFO]   RDS License Usage Monitoring | Citrix Workspace Automation Suite
+[2026-06-26 22:16:15][INFO]   V1.5.1  |  Warn=80%  Crit=95%
+[2026-06-26 22:16:15][INFO] =================================================================
+[2026-06-26 22:16:15][INFO] 1 server(s): amsdc1-s-7060.europe.shell.com
+[2026-06-26 22:16:15][INFO] Output folder: C:\Scripts\RDL\Output\
+[2026-06-26 22:16:15][INFO] --- [amsdc1-s-7060.europe.shell.com] Starting ---
+[2026-06-26 22:16:15][ERROR] Query failed for [amsdc1-s-7060.europe.shell.com]: Cannot bind argument to parameter 'ErrorLog' because it is an empty collection.
+[2026-06-26 22:16:15][INFO] =================================================================
+[2026-06-26 22:16:15][SUCCESS] Batch complete: 0 succeeded, 1 failed of 1 total
+[2026-06-26 22:16:15][ERROR] Failed: amsdc1-s-7060.europe.shell.com
+[2026-06-26 22:16:15][WARN] No successful results -- no report generated.
 
-At C:\Windows\TEMP\temp123598210551.ps1:912 char:50
-+                 WriteLog    = $function:Write-Log.ToString()
-+                                                  ~~~~~~~~~
-Unexpected token '.ToString' in expression or statement.
-
-At C:\Windows\TEMP\temp123598210551.ps1:912 char:50
-+                 WriteLog    = $function:Write-Log.ToString()
-+                                                  ~
-The hash literal was incomplete.
-
-At C:\Windows\TEMP\temp123598210551.ps1:912 char:60
-+                 WriteLog    = $function:Write-Log.ToString()
-+                                                            ~
-An expression was expected after '('.
-
-At C:\Windows\TEMP\temp123598210551.ps1:913 char:65
-+                 GetComp     = $function:Get-Compliance.ToString()
-+                                                                 ~
-An expression was expected after '('.
-
-At C:\Windows\TEMP\temp123598210551.ps1:914 char:72
-+ ...              WmiExpiry   = $function:ConvertFrom-WmiExpiry.ToString()
-+                                                                         ~
-An expression was expected after '('.
-
-At C:\Windows\TEMP\temp123598210551.ps1:915 char:63
-+                 GetKeyPacks = $function:Get-KeyPacks.ToString()
-+                                                               ~
-An expression was expected after '('.
-
-At C:\Windows\TEMP\temp123598210551.ps1:916 char:64
-+                 GetOsVer    = $function:Get-OSVersion.ToString()
-+                                                                ~
-An expression was expected after '('.
-
-At C:\Windows\TEMP\temp123598210551.ps1:917 char:77
-+ ...         Invoke      = $function:Invoke-LicenseServerReport.ToString()
-+                                                                         ~
-An expression was expected after '('.
-
-At C:\Windows\TEMP\temp123598210551.ps1:918 char:14
-+             }
-+              ~
-The Try statement is missing its Catch or Finally block.
-
-Not all parse errors were reported.  Correct the reported errors and try again.
-    + CategoryInfo          : ParserError: (:) [], ParseException
-    + FullyQualifiedErrorId : UnexpectedToken
+ID:   HPSA-1155
+Code:   com.opsware.script.ScriptMessageSpec.NON_ZERO_EXIT_CODE
+Details:   The exit code from the script was 3.
