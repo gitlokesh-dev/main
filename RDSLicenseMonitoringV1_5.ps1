@@ -1,7 +1,7 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-# Version      : V1.5
+# Version      : V1.5.1
 # Compatibility: PowerShell 5.1+  |  Windows Server 2016 / 2019 / 2022
 #
 # USAGE
@@ -14,6 +14,13 @@
 #
 # CHANGE LOG
 # ----------
+#  V1.5.1 (2026-05-28)  PARSE ERROR FIX
+#        $function:Write-Log syntax fails at parse time when the function name
+#        contains a hyphen -- PowerShell's variable namespace syntax does not
+#        allow hyphens in the identifier after the colon.  All six $function:X
+#        references replaced with (Get-Command X).ScriptBlock.ToString() which
+#        works correctly for any function name regardless of punctuation.
+#
 #  V1.5  (2026-05-28)  BUG FIXES -- verified clean execution
 #        FIX 1  EscapeJson backslash regex was wrong.
 #               '-replace "\\","\\\"' only matched one backslash (regex `\` = literal \)
@@ -57,7 +64,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.5"
+$ScriptVersion        = "V1.5.1"
 #endregion CONFIG
 
 
@@ -996,13 +1003,15 @@ try {
             # FIX 2+3: use AddScript([string]) + AddArgument(); use
             #           Set-Item function:\ inside the runspace to define
             #           functions without Invoke-Expression string-expansion bugs.
+            # $function:Name syntax does not support hyphens in PowerShell.
+            # Use (Get-Command Name).ScriptBlock.ToString() instead -- always works.
             $fnBodies = @{
-                WriteLog    = $function:Write-Log.ToString()
-                GetComp     = $function:Get-Compliance.ToString()
-                WmiExpiry   = $function:ConvertFrom-WmiExpiry.ToString()
-                GetKeyPacks = $function:Get-KeyPacks.ToString()
-                GetOsVer    = $function:Get-OSVersion.ToString()
-                Invoke      = $function:Invoke-LicenseServerReport.ToString()
+                WriteLog    = (Get-Command Write-Log).ScriptBlock.ToString()
+                GetComp     = (Get-Command Get-Compliance).ScriptBlock.ToString()
+                WmiExpiry   = (Get-Command ConvertFrom-WmiExpiry).ScriptBlock.ToString()
+                GetKeyPacks = (Get-Command Get-KeyPacks).ScriptBlock.ToString()
+                GetOsVer    = (Get-Command Get-OSVersion).ScriptBlock.ToString()
+                Invoke      = (Get-Command Invoke-LicenseServerReport).ScriptBlock.ToString()
             }
 
             $Jobs = [System.Collections.Generic.List[object]]::new()
