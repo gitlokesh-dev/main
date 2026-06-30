@@ -1,12 +1,25 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-# Version      : V1.7
+# Version      : V1.8
 # Compatibility: PowerShell 5.1+  |  Windows Server 2016 / 2019 / 2022
 #
 # USAGE
 #   Single server   : -LicenseServerFQDN "amsdc1-s-7060.domain.com"
 #   Multiple servers: -LicenseServerFQDN "srv1.domain.com;srv2.domain.com"
+#
+#   *** CRITICAL -- HPSA / Camunda PARAMETER QUOTING ***
+#   The value passed for LicenseServerFQDN MUST be wrapped in double quotes
+#   in the HPSA job/parameter definition, e.g.:
+#       -LicenseServerFQDN "srv1.domain.com;srv2.domain.com;srv3.domain.com"
+#   If the semicolon-separated list is passed WITHOUT quotes, PowerShell's
+#   own command-line parser (not this script) splits on ';' BEFORE the
+#   script ever runs, and tries to execute "srv2.domain.com" etc. as a
+#   separate command -- producing errors like:
+#       "The term 'srv2.domain.com' is not recognized as the name of a
+#        cmdlet, function, script file, or operable program."
+#   This is an HPSA/Camunda job-configuration issue, not a script bug --
+#   fix it by quoting the parameter value at the call site.
 #
 # OUTPUT (written to $OutputDir)
 #   RDSLicenseMonitoring_<ServerName>_<timestamp>.html   (single server)
@@ -14,6 +27,33 @@
 #
 # CHANGE LOG
 # ----------
+#  V1.8  (2026-06-30)  CRITICAL BUG FIX -- Expired packs still counted
+#        ROOT CAUSE: V1.7 switched to Get-CimInstance as the primary query
+#        method (to fix the multi-server data-loss bug).  Get-CimInstance
+#        returns WMI DATETIME properties ALREADY CONVERTED to .NET [datetime]
+#        objects, whereas Get-WmiObject returns them as raw WMI strings
+#        (e.g. "20380119031407.000000-000").  ConvertFrom-WmiExpiry assumed
+#        the raw string format unconditionally: every call site forced
+#        [string]$pack.ExpirationDate before passing it in, which stringifies
+#        a .NET DateTime using the current culture (e.g. "06/30/2024 00:00:00")
+#        instead of the WMI format.  Substring(0,14) on that culture-formatted
+#        string does not match "yyyyMMddHHmmss", ParseExact throws, and the
+#        catch block silently returned $null ("Never expires") for every
+#        single pack queried via CIM -- meaning NO pack was ever correctly
+#        identified as expired after the V1.7 CIM-first change, regardless
+#        of its real expiration date.
+#
+#        FIX: ConvertFrom-WmiExpiry now accepts the value as untyped [object]
+#        and branches on the actual .NET type at runtime:
+#          - if it is already a [datetime] (CIM) -- use it directly
+#          - if it is a string (legacy WMI)        -- parse with the original
+#            yyyyMMddHHmmss logic
+#        All three call sites updated to pass $pack.ExpirationDate RAW,
+#        without a premature [string] cast, so the type-detection works.
+#        Added a [RAW] diagnostic log line per pack showing the raw value
+#        and its .NET type, so any future WMI/CIM behaviour change is
+#        immediately visible in the HPSA log instead of silently swallowed.
+#
 #  V1.7  (2026-06-27)  BUG FIX -- Multi-server STILL returned data for only
 #        the first server after V1.6 made queries sequential.  This ruled out
 #        thread/COM-apartment contention (the V1.6 theory) since sequential
@@ -127,7 +167,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.7"
+$ScriptVersion        = "V1.8"
 #endregion CONFIG
 
 
@@ -184,21 +224,55 @@ function Get-Compliance {
 # Returns $null for null/empty input OR for the WMI "Never" epoch (year <= 1970).
 # ─────────────────────────────────────────────────────────────────────────────
 function ConvertFrom-WmiExpiry {
-    param([string]$Raw)
-    if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
+    <#
+    .SYNOPSIS
+        Safely converts a Win32_TSLicenseKeyPack.ExpirationDate value to UTC.
+    .NOTES
+        CRITICAL: Get-CimInstance and Get-WmiObject return ExpirationDate in
+        TWO DIFFERENT .NET TYPES:
+          - Get-WmiObject  returns the raw WMI string, e.g. "20380119031407.000000-000"
+          - Get-CimInstance returns an ALREADY-CONVERTED [datetime] .NET object
+        The previous version always called [string]$pack.ExpirationDate and tried
+        to Substring(0,14) it as if it were the raw WMI string format.  When the
+        value came from CIM, [string] of a DateTime produces something like
+        "06/30/2024 00:00:00" (current-culture format) -- Substring(0,14) on that
+        does not match "yyyyMMddHHmmss" at all, ParseExact throws, the catch block
+        swallows the error, and the function silently returns $null ("Never").
+        This caused EVERY expired pack queried via CIM to be wrongly treated as
+        non-expiring, so expired packs kept being counted toward the totals.
+        FIX: accept the parameter as [object] and branch on its actual .NET type
+        before attempting any parsing.
+    #>
+    param($Raw)
+
+    if ($null -eq $Raw) { return $null }
+
+    # Case 1: CIM already gave us a real [datetime] -- use it directly, no parsing.
+    if ($Raw -is [datetime]) {
+        $dt = [datetime]$Raw
+        if ($dt.Year -le 1970) { return $null }   # WMI "Never expires" sentinel
+        return $dt.ToUniversalTime()
+    }
+
+    # Case 2: legacy Get-WmiObject gives us the raw WMI string format.
+    $RawStr = [string]$Raw
+    if ([string]::IsNullOrWhiteSpace($RawStr)) { return $null }
+
     try {
-        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU  -- take first 14 chars
-        $datePart = $Raw.Substring(0, 14)
+        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU -- take first 14 chars
+        if ($RawStr.Length -lt 14) { return $null }
+        $datePart = $RawStr.Substring(0, 14)
         $dt = [datetime]::ParseExact(
                   $datePart,
                   'yyyyMMddHHmmss',
                   [System.Globalization.CultureInfo]::InvariantCulture,
                   [System.Globalization.DateTimeStyles]::AssumeUniversal)
-        # Year <= 1970 is the WMI "Never expires" sentinel value
-        if ($dt.Year -le 1970) { return $null }
+        if ($dt.Year -le 1970) { return $null }   # WMI "Never expires" sentinel
         return $dt.ToUniversalTime()
     } catch {
-        # Unparseable date -- treat as non-expiring to avoid false exclusions
+        # Genuinely unparseable -- treat as non-expiring to avoid false exclusions,
+        # but log it so it is visible instead of silently disappearing.
+        Write-Log "  ConvertFrom-WmiExpiry: could not parse raw value '$RawStr' (type=$($Raw.GetType().Name))" "WARN"
         return $null
     }
 }
@@ -944,6 +1018,13 @@ function Invoke-LicenseServerReport {
 
         foreach ($pack in $KeyPacks) {
 
+            # Diagnostic: log the raw ExpirationDate value and its .NET type
+            # for every pack so any future mismatch is immediately visible
+            # in the HPSA log rather than silently swallowed.
+            $rawExpType = if ($null -eq $pack.ExpirationDate) { "null" } else { $pack.ExpirationDate.GetType().Name }
+            Write-Log ("  [RAW] {0} | KeyPackType={1} | ExpirationDate='{2}' (type={3})" -f `
+                $pack.Description, $pack.KeyPackType, $pack.ExpirationDate, $rawExpType) "INFO"
+
             # Step 1 -- exclude unlimited / built-in packs
             $tl = [int64]$pack.TotalLicenses
             if ($tl -eq -1 -or $tl -eq 4294967295) {
@@ -959,7 +1040,12 @@ function Invoke-LicenseServerReport {
             }
 
             # Step 3 -- exclude expired by ExpirationDate
-            $expiry = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
+            # IMPORTANT: pass $pack.ExpirationDate RAW (no [string] cast) so
+            # ConvertFrom-WmiExpiry can detect whether CIM already converted
+            # it to a [datetime] or whether it is still the raw WMI string.
+            # Forcing [string] here was the root cause of expired packs being
+            # silently treated as "Never expires" -- see function comment.
+            $expiry = ConvertFrom-WmiExpiry -Raw $pack.ExpirationDate
             if ($null -ne $expiry -and $expiry -lt $NowUtc) {
                 $ExpiredCount++
                 Write-Log ("  [SKIP-EXPIRED-DATE] {0} | Expiry={1:yyyy-MM-dd}" -f `
@@ -989,10 +1075,10 @@ function Invoke-LicenseServerReport {
 
         # Audit log -- one line per active pack that contributes to totals
         foreach ($pack in $ActivePacks) {
-            $expStr = if ([string]::IsNullOrWhiteSpace([string]$pack.ExpirationDate)) {
+            $expStr = if ($null -eq $pack.ExpirationDate) {
                           "Never"
                       } else {
-                          $dt = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
+                          $dt = ConvertFrom-WmiExpiry -Raw $pack.ExpirationDate
                           if ($null -ne $dt) { $dt.ToString("yyyy-MM-dd") } else { "Never" }
                       }
             Write-Log ("  [ACTIVE] {0} | Total={1} | Issued={2} | Available={3} | Expiry={4}" -f `
