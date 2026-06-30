@@ -1,7 +1,7 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-# Version      : V1.8
+# Version      : V1.9
 # Compatibility: PowerShell 5.1+  |  Windows Server 2016 / 2019 / 2022
 #
 # USAGE
@@ -27,6 +27,39 @@
 #
 # CHANGE LOG
 # ----------
+#  V1.9  (2026-07-01)  DIAGNOSTIC + CROSS-DOMAIN AUTH FIX -- "first server
+#        works, others empty" persisted even after V1.7 (sequential queries)
+#        and V1.8 (CIM datetime fix), with each server confirmed to work
+#        correctly when run individually.  This rules out threading, COM
+#        caching, and datetime-parsing as the cause -- the remaining
+#        explanation is environmental: the failing servers are in different
+#        AD domains (europe.shell.com / asia-pac.shell.com / americas.shell.com).
+#
+#        CHANGES IN THIS VERSION:
+#          1. -Authentication Negotiate is now forced on every New-CimSession
+#             call.  Without an explicit authentication mechanism, WSMan/DCOM
+#             can silently pick NTLM for one domain and Kerberos for another
+#             within the same process, and the failure can present as an
+#             empty/no-error result rather than a visible auth exception.
+#          2. Every failure at every stage (WSMan, DCOM, legacy WMI) now logs
+#             the FULL exception type and message per server, not just a
+#             generic warning -- so the actual blocking reason (access denied,
+#             RPC server unavailable, Kerberos realm mismatch, etc.) is
+#             visible in the HPSA log instead of being summarised away.
+#          3. If Installed=0 for a server after all attempts, an explicit
+#             ERROR-level banner line is printed pointing back at the issue
+#             list above it, so a scan of the log cannot miss a failed server.
+#          4. Every captured error message is now printed individually
+#             (previously only the COUNT of errors was logged, not their text).
+#
+#        NEXT STEP IF THIS STILL FAILS: re-run with all 3 servers and search
+#        the log for "[$Server] CIM (WSMan) FAILED" / "CIM (DCOM) FAILED" /
+#        "ALL THREE methods failed" for the failing servers -- the Detail=
+#        text on those lines will show the real blocking reason (commonly:
+#        WinRM not enabled on that server, firewall blocking RPC/WMI ports,
+#        the HPSA service account lacking rights in that domain, or a
+#        one-way/no trust relationship between the domains involved).
+#
 #  V1.8  (2026-06-30)  CRITICAL BUG FIX -- Expired packs still counted
 #        ROOT CAUSE: V1.7 switched to Get-CimInstance as the primary query
 #        method (to fix the multi-server data-loss bug).  Get-CimInstance
@@ -167,7 +200,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.8"
+$ScriptVersion        = "V1.9"
 #endregion CONFIG
 
 
@@ -866,59 +899,64 @@ function Get-KeyPacks {
         [System.Collections.Generic.List[string]]$ErrorLog
     )
 
-    # Attempt 1: CIM over WSMan (explicit session per server -- no hidden
-    # connection caching).  This is tried FIRST because legacy Get-WmiObject
-    # uses DCOM under the hood, and DCOM connections to remote computers can
-    # be cached/pooled by the OS RPC layer keyed loosely by process.  When
-    # querying several DIFFERENT servers from the same script process,
-    # Get-WmiObject's 2nd/3rd/... calls have been observed to silently
-    # return stale or empty results from the cached connection of the FIRST
-    # server queried -- exactly matching "server #1 works, others empty".
-    # A fresh CimSession explicitly tied to $Server avoids that entirely.
+    # NOTE: if your servers span multiple AD domains/forests (e.g.
+    # europe.shell.com, asia-pac.shell.com, americas.shell.com), CIM/WMI
+    # authentication is evaluated independently per server -- there is no
+    # shared state between calls in THIS function.  If server #1 succeeds
+    # and #2/#3 fail when run together but succeed when run alone, the most
+    # likely cause is a Kerberos/cross-domain authentication issue specific
+    # to where this script executes from (the HPSA agent), not the script
+    # logic.  -Authentication Negotiate is forced below to avoid silent
+    # NTLM-vs-Kerberos fallback mismatches between domains.
+
+    # Attempt 1: CIM over WSMan (explicit, isolated session per server)
     $cimSess = $null
     try {
-        $cimSess = New-CimSession -ComputerName $Server -ErrorAction Stop
+        $cimSess = New-CimSession -ComputerName $Server -Authentication Negotiate -ErrorAction Stop
         $packs   = @(Get-CimInstance -CimSession $cimSess `
                          -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        Write-Log "  CIM (WSMan) OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        Write-Log "  [$Server] CIM (WSMan) OK -- $($packs.Count) key pack(s)" "SUCCESS"
         return $packs
     } catch {
-        Write-Log "  CIM (WSMan) failed: $($_.Exception.Message) -- retrying via CIM/DCOM..." "WARN"
+        $errDetail = $_.Exception.Message
+        $errType   = $_.Exception.GetType().FullName
+        Write-Log "  [$Server] CIM (WSMan) FAILED -- Type=$errType | Detail=$errDetail" "WARN"
     } finally {
         if ($null -ne $cimSess) {
             try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
         }
     }
 
-    # Attempt 2: CIM over DCOM (for hosts that only have legacy WMI/DCOM,
-    # not WinRM, enabled).  Still an explicit per-server session.
+    # Attempt 2: CIM over DCOM (for hosts without WinRM enabled)
     $cimSess = $null
     try {
         $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $Server `
-                       -SessionOption $cimOpts -ErrorAction Stop
+        $cimSess = New-CimSession -ComputerName $Server -SessionOption $cimOpts `
+                       -Authentication Negotiate -ErrorAction Stop
         $packs   = @(Get-CimInstance -CimSession $cimSess `
                          -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        Write-Log "  CIM (DCOM) OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        Write-Log "  [$Server] CIM (DCOM) OK -- $($packs.Count) key pack(s)" "SUCCESS"
         return $packs
     } catch {
-        Write-Log "  CIM (DCOM) failed: $($_.Exception.Message) -- retrying via legacy WMI..." "WARN"
+        $errDetail = $_.Exception.Message
+        $errType   = $_.Exception.GetType().FullName
+        Write-Log "  [$Server] CIM (DCOM) FAILED -- Type=$errType | Detail=$errDetail" "WARN"
     } finally {
         if ($null -ne $cimSess) {
             try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
         }
     }
 
-    # Attempt 3: legacy Get-WmiObject (last resort -- known to cache DCOM
-    # connections across calls to different -ComputerName values in the
-    # same process).  Kept only as a final fallback for very old hosts.
+    # Attempt 3: legacy Get-WmiObject (last resort)
     try {
         $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
                        -ComputerName $Server -ErrorAction Stop)
-        Write-Log "  Legacy WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        Write-Log "  [$Server] Legacy WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
         return $packs
     } catch {
-        $msg = "[$Server] unreachable via CIM (WSMan), CIM (DCOM) and legacy WMI: $($_.Exception.Message)"
+        $errDetail = $_.Exception.Message
+        $errType   = $_.Exception.GetType().FullName
+        $msg = "[$Server] ALL THREE methods failed. Last error: Type=$errType | Detail=$errDetail"
         $ErrorLog.Add($msg)
         Write-Log "  $msg" "ERROR"
         return @()
@@ -939,12 +977,12 @@ function Get-OSVersion {
     # Attempt 1: CIM over WSMan (explicit per-server session)
     $cimSess = $null
     try {
-        $cimSess = New-CimSession -ComputerName $Server -ErrorAction Stop
+        $cimSess = New-CimSession -ComputerName $Server -Authentication Negotiate -ErrorAction Stop
         $os      = Get-CimInstance -CimSession $cimSess `
                        -ClassName "Win32_OperatingSystem" -ErrorAction Stop
         return "$($os.Caption)".Trim()
     } catch {
-        Write-Log "  CIM (WSMan) OS query failed: $($_.Exception.Message) -- retrying via CIM/DCOM..." "WARN"
+        Write-Log "  [$Server] CIM (WSMan) OS query FAILED -- Detail=$($_.Exception.Message)" "WARN"
     } finally {
         if ($null -ne $cimSess) {
             try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
@@ -955,13 +993,13 @@ function Get-OSVersion {
     $cimSess = $null
     try {
         $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $Server `
-                       -SessionOption $cimOpts -ErrorAction Stop
+        $cimSess = New-CimSession -ComputerName $Server -SessionOption $cimOpts `
+                       -Authentication Negotiate -ErrorAction Stop
         $os      = Get-CimInstance -CimSession $cimSess `
                        -ClassName "Win32_OperatingSystem" -ErrorAction Stop
         return "$($os.Caption)".Trim()
     } catch {
-        Write-Log "  CIM (DCOM) OS query failed: $($_.Exception.Message) -- retrying via legacy WMI..." "WARN"
+        Write-Log "  [$Server] CIM (DCOM) OS query FAILED -- Detail=$($_.Exception.Message)" "WARN"
     } finally {
         if ($null -ne $cimSess) {
             try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
@@ -988,7 +1026,8 @@ function Get-OSVersion {
 function Invoke-LicenseServerReport {
     param([Parameter(Mandatory)][string]$Server)
 
-    Write-Log "--- [$Server] Starting ---"
+    Write-Log "=================================================================" "INFO"
+    Write-Log "--- [$Server] Starting ---" "INFO"
     $ErrorLog = [System.Collections.Generic.List[string]]::new()
 
     # 1. Query key packs ──────────────────────────────────────────────────────
@@ -1109,7 +1148,15 @@ function Invoke-LicenseServerReport {
 
     Write-Log ("  Result: {0}/{1} ({2}%) => {3}" -f $Issued, $Installed, $UsagePct, $Compliance)
     if ($ErrorLog.Count -gt 0) {
-        Write-Log "  $($ErrorLog.Count) issue(s) captured for [$Server]" "WARN"
+        Write-Log "  [$Server] $($ErrorLog.Count) issue(s) captured -- printing each below:" "WARN"
+        $i = 0
+        foreach ($e in $ErrorLog) {
+            $i++
+            Write-Log "    [$Server] Issue ${i}: $e" "WARN"
+        }
+    }
+    if ($Installed -eq 0) {
+        Write-Log "  [$Server] *** WARNING: Installed=0 -- this server returned NO usable license data. Check the issues listed above for the exact cause. ***" "ERROR"
     }
     Write-Log "--- [$Server] Complete ---"
 
