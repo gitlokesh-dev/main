@@ -1,7 +1,7 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-# Version      : V1.6
+# Version      : V1.7
 # Compatibility: PowerShell 5.1+  |  Windows Server 2016 / 2019 / 2022
 #
 # USAGE
@@ -14,7 +14,38 @@
 #
 # CHANGE LOG
 # ----------
-#  V1.6  (2026-06-27)  BUG FIX -- Multi-server runs returned data for only
+#  V1.7  (2026-06-27)  BUG FIX -- Multi-server STILL returned data for only
+#        the first server after V1.6 made queries sequential.  This ruled out
+#        thread/COM-apartment contention (the V1.6 theory) since sequential
+#        execution still failed identically.
+#
+#        ROOT CAUSE (confirmed): legacy Get-WmiObject -ComputerName uses
+#        DCOM under the hood, and DCOM remote connections are cached/pooled
+#        by the underlying Windows RPC layer for the lifetime of the
+#        PowerShell process -- NOT just for the lifetime of a single
+#        runspace/thread.  When the script calls Get-WmiObject for server #1
+#        successfully, the OS can reuse that cached DCOM binding/auth context
+#        for the NEXT Get-WmiObject call even though -ComputerName points to
+#        a different server, causing the 2nd/3rd calls to silently return
+#        empty results instead of an error (so no exception was ever thrown
+#        or logged -- it just looked like "no data").
+#
+#        FIX: Get-KeyPacks and Get-OSVersion now try, in order:
+#          1. Get-CimInstance over WSMan (New-CimSession, no -SessionOption)
+#             -- explicit, isolated session per server; no DCOM connection
+#             pooling involved at all.  This is the modern, recommended
+#             replacement for Get-WmiObject and is tried FIRST.
+#          2. Get-CimInstance over DCOM (New-CimSessionOption -Protocol Dcom)
+#             -- for hosts with WMI/DCOM but no WinRM listener.  Still uses
+#             an explicit per-call CimSession object (disposed immediately
+#             after use), which does not exhibit the same caching behaviour
+#             as Get-WmiObject.
+#          3. Legacy Get-WmiObject -- kept only as a last-resort fallback.
+#        Every CimSession is created fresh per server and disposed in a
+#        finally block immediately after use, eliminating any possibility
+#        of state leaking from one server's query into the next.
+#
+#  V1.6  (2026-06-27)  Removed RunspacePool / parallel execution (see below)
 #        the first server; servers 2, 3, ... came back empty.
 #
 #        ROOT CAUSE: the parallel RunspacePool ran every server's WMI/CIM
@@ -96,7 +127,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.6"
+$ScriptVersion        = "V1.7"
 #endregion CONFIG
 
 
@@ -761,17 +792,32 @@ function Get-KeyPacks {
         [System.Collections.Generic.List[string]]$ErrorLog
     )
 
-    # Attempt 1: WMI (fastest path) ──────────────────────────────────────────
+    # Attempt 1: CIM over WSMan (explicit session per server -- no hidden
+    # connection caching).  This is tried FIRST because legacy Get-WmiObject
+    # uses DCOM under the hood, and DCOM connections to remote computers can
+    # be cached/pooled by the OS RPC layer keyed loosely by process.  When
+    # querying several DIFFERENT servers from the same script process,
+    # Get-WmiObject's 2nd/3rd/... calls have been observed to silently
+    # return stale or empty results from the cached connection of the FIRST
+    # server queried -- exactly matching "server #1 works, others empty".
+    # A fresh CimSession explicitly tied to $Server avoids that entirely.
+    $cimSess = $null
     try {
-        $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
-                       -ComputerName $Server -ErrorAction Stop)
-        Write-Log "  WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        $cimSess = New-CimSession -ComputerName $Server -ErrorAction Stop
+        $packs   = @(Get-CimInstance -CimSession $cimSess `
+                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
+        Write-Log "  CIM (WSMan) OK -- $($packs.Count) key pack(s)" "SUCCESS"
         return $packs
     } catch {
-        Write-Log "  WMI failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+        Write-Log "  CIM (WSMan) failed: $($_.Exception.Message) -- retrying via CIM/DCOM..." "WARN"
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
     }
 
-    # Attempt 2: CIM over DCOM (fallback) ────────────────────────────────────
+    # Attempt 2: CIM over DCOM (for hosts that only have legacy WMI/DCOM,
+    # not WinRM, enabled).  Still an explicit per-server session.
     $cimSess = $null
     try {
         $cimOpts = New-CimSessionOption -Protocol Dcom
@@ -779,17 +825,29 @@ function Get-KeyPacks {
                        -SessionOption $cimOpts -ErrorAction Stop
         $packs   = @(Get-CimInstance -CimSession $cimSess `
                          -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        Write-Log "  CIM OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        Write-Log "  CIM (DCOM) OK -- $($packs.Count) key pack(s)" "SUCCESS"
         return $packs
     } catch {
-        $msg = "[$Server] unreachable via WMI and CIM: $($_.Exception.Message)"
-        $ErrorLog.Add($msg)
-        Write-Log "  $msg" "ERROR"
-        return @()
+        Write-Log "  CIM (DCOM) failed: $($_.Exception.Message) -- retrying via legacy WMI..." "WARN"
     } finally {
         if ($null -ne $cimSess) {
             try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
         }
+    }
+
+    # Attempt 3: legacy Get-WmiObject (last resort -- known to cache DCOM
+    # connections across calls to different -ComputerName values in the
+    # same process).  Kept only as a final fallback for very old hosts.
+    try {
+        $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
+                       -ComputerName $Server -ErrorAction Stop)
+        Write-Log "  Legacy WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        return $packs
+    } catch {
+        $msg = "[$Server] unreachable via CIM (WSMan), CIM (DCOM) and legacy WMI: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "ERROR"
+        return @()
     }
 }
 
@@ -804,16 +862,22 @@ function Get-OSVersion {
         [System.Collections.Generic.List[string]]$ErrorLog
     )
 
-    # Attempt 1: WMI ─────────────────────────────────────────────────────────
+    # Attempt 1: CIM over WSMan (explicit per-server session)
+    $cimSess = $null
     try {
-        $os = Get-WmiObject -Class "Win32_OperatingSystem" `
-                  -ComputerName $Server -ErrorAction Stop
+        $cimSess = New-CimSession -ComputerName $Server -ErrorAction Stop
+        $os      = Get-CimInstance -CimSession $cimSess `
+                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
         return "$($os.Caption)".Trim()
     } catch {
-        Write-Log "  WMI OS query failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+        Write-Log "  CIM (WSMan) OS query failed: $($_.Exception.Message) -- retrying via CIM/DCOM..." "WARN"
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
     }
 
-    # Attempt 2: CIM over DCOM ───────────────────────────────────────────────
+    # Attempt 2: CIM over DCOM
     $cimSess = $null
     try {
         $cimOpts = New-CimSessionOption -Protocol Dcom
@@ -823,14 +887,23 @@ function Get-OSVersion {
                        -ClassName "Win32_OperatingSystem" -ErrorAction Stop
         return "$($os.Caption)".Trim()
     } catch {
-        $msg = "Could not retrieve OS version for [$Server]: $($_.Exception.Message)"
-        $ErrorLog.Add($msg)
-        Write-Log "  $msg" "WARN"
-        return "N/A"
+        Write-Log "  CIM (DCOM) OS query failed: $($_.Exception.Message) -- retrying via legacy WMI..." "WARN"
     } finally {
         if ($null -ne $cimSess) {
             try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
         }
+    }
+
+    # Attempt 3: legacy WMI (last resort)
+    try {
+        $os = Get-WmiObject -Class "Win32_OperatingSystem" `
+                  -ComputerName $Server -ErrorAction Stop
+        return "$($os.Caption)".Trim()
+    } catch {
+        $msg = "Could not retrieve OS version for [$Server] via CIM (WSMan), CIM (DCOM) or legacy WMI: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "WARN"
+        return "N/A"
     }
 }
 
