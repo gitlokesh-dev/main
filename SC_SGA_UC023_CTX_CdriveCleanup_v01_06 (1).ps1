@@ -10,9 +10,9 @@
 # --- Global error preference: Stop so try/catch can intercept ---
 $ErrorActionPreference = "Stop"
 
-# ─────────────────────────────────────────────
+# 
 # CONFIGURATION
-# ─────────────────────────────────────────────
+# 
 $global:ScriptTimeoutSec   = 480    # Hard ceiling for entire script (seconds)
 $global:CleanMgrTimeoutSec = 120    # Max time to wait for CleanMgr.exe (seconds)
 $global:ServiceTimeoutSec  = 30     # Max wait for service stop/start (seconds)
@@ -25,9 +25,9 @@ $global:LogFile            = "C:\Windows\Temp\CTX_CdriveCleanup_$($global:LogDat
 $global:PhaseResults       = [ordered]@{}
 $global:FailureOccurred    = $false
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: Structured logging
-# ─────────────────────────────────────────────
+# 
 function Write-Log {
     param(
         [string]$Message,
@@ -40,31 +40,31 @@ function Write-Log {
     try { $line | Out-File -Append -FilePath $global:LogFile -ErrorAction SilentlyContinue } catch {}
 }
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: Record phase result
-# ─────────────────────────────────────────────
+# 
 function Set-PhaseResult {
     param([string]$Phase, [string]$Status)   # Status: OK | WARN:msg | FAIL:msg
     $global:PhaseResults[$Phase] = $Status
     if ($Status -like "FAIL:*") { $global:FailureOccurred = $true }
 }
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: Assert script is within time budget
-# ─────────────────────────────────────────────
+# 
 function Assert-TimeRemaining {
     param([string]$Phase = "")
     $elapsed = (New-TimeSpan -Start $global:ScriptStartTime -End (Get-Date)).TotalSeconds
     if ($elapsed -ge $global:ScriptTimeoutSec) {
         Write-Log "Script time budget exhausted at phase [$Phase] after ${elapsed}s. Exiting." "WARN"
         Invoke-FinalSummary
-        Exit 2   # Exit code 2 = timeout / partial completion — NOT success, NOT hard failure
+        Exit 2   # Exit code 2 = timeout / partial completion €” NOT success, NOT hard failure
     }
 }
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: C Drive space snapshot
-# ─────────────────────────────────────────────
+# 
 function Show-CDriveSpace {
     try {
         $drive = Get-CimInstance -Class Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop
@@ -86,9 +86,9 @@ function Report-CDriveSpace {
     Write-Log "[$Label] Total: $($Space.TotalGB) GB  |  Used: $($Space.UsedGB) GB  |  Free: $($Space.FreeGB) GB" "INFO"
 }
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: Restore-point deletion
-# ─────────────────────────────────────────────
+# 
 function Delete-ComputerRestorePoints {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -127,9 +127,9 @@ function Delete-ComputerRestorePoints {
     }
 }
 
-# ─────────────────────────────────────────────
-# HELPER: Fast bulk delete — age-filtered, locked files skipped
-# ─────────────────────────────────────────────
+# 
+# HELPER: Fast bulk delete €” age-filtered, locked files skipped
+# 
 function Remove-OldFiles {
     param(
         [string]$Path,
@@ -161,7 +161,7 @@ function Remove-OldFiles {
                         $deletedCount++
                     }
                     catch {
-                        # Locked / access-denied files are expected — count but don't fail
+                        # Locked / access-denied files are expected €” count but don't fail
                         $errorCount++
                     }
                 }
@@ -177,16 +177,16 @@ function Remove-OldFiles {
                     }
             }
         }
-        Write-Log "  Path [$Path] — Deleted: $deletedCount file(s), Skipped/locked: $errorCount" "INFO"
+        Write-Log "  Path [$Path] €” Deleted: $deletedCount file(s), Skipped/locked: $errorCount" "INFO"
     }
     catch {
         Write-Log "  Remove-OldFiles failed for [$Path]: $($_.Exception.Message)" "WARN"
     }
 }
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: Service stop/start with timeout + error handling
-# ─────────────────────────────────────────────
+# 
 function Stop-ServiceSafe {
     param([string]$Name)
     try {
@@ -199,7 +199,7 @@ function Stop-ServiceSafe {
             Start-Sleep -Seconds 2; $waited += 2
         }
         if ($waited -ge $global:ServiceTimeoutSec) {
-            Write-Log "Service '$Name' did not stop within $($global:ServiceTimeoutSec)s — continuing." "WARN"
+            Write-Log "Service '$Name' did not stop within $($global:ServiceTimeoutSec)s €” continuing." "WARN"
         }
     }
     catch {
@@ -219,7 +219,7 @@ function Start-ServiceSafe {
             Start-Sleep -Seconds 2; $waited += 2
         }
         if ($waited -ge $global:ServiceTimeoutSec) {
-            Write-Log "Service '$Name' did not start within $($global:ServiceTimeoutSec)s — continuing." "WARN"
+            Write-Log "Service '$Name' did not start within $($global:ServiceTimeoutSec)s €” continuing." "WARN"
         }
     }
     catch {
@@ -227,28 +227,28 @@ function Start-ServiceSafe {
     }
 }
 
-# ─────────────────────────────────────────────
+# 
 # HELPER: Print phase summary table and final exit
-# ─────────────────────────────────────────────
+# 
 function Invoke-FinalSummary {
     $elapsed = [math]::Round((New-TimeSpan -Start $global:ScriptStartTime -End (Get-Date)).TotalSeconds, 1)
-    Write-Log "─────────────────────────────────────────" "INFO"
+    Write-Log "" "INFO"
     Write-Log "PHASE RESULTS SUMMARY" "INFO"
-    Write-Log "─────────────────────────────────────────" "INFO"
+    Write-Log "" "INFO"
     foreach ($key in $global:PhaseResults.Keys) {
         $val   = $global:PhaseResults[$key]
         $level = if ($val -eq "OK") { "SUCCESS" } elseif ($val -like "WARN:*") { "WARN" } else { "ERROR" }
         Write-Log ("  {0,-35} {1}" -f $key, $val) $level
     }
-    Write-Log "─────────────────────────────────────────" "INFO"
+    Write-Log "" "INFO"
     Write-Log "Total Script Duration : ${elapsed}s" "INFO"
     Write-Log "Log File              : $($global:LogFile)" "INFO"
 }
 
 
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 # SMART AUTOMATION CONTROL BLOCK
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 try {
     $acDir  = 'C:\Apps\Monitor\logs\AutomationControl'
     $acFile = "$acDir\t_po_os_shell_citrix_thr_disk_util.log"
@@ -294,9 +294,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 # ADMIN CHECK
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Write-Log "Checking Local Admin rights..." "INFO"
 If (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]"Administrator")) {
@@ -308,17 +308,17 @@ If (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 # PRE-CLEANUP SNAPSHOT
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Write-Log "Checking C Drive space BEFORE cleanup..." "INFO"
 $beforeSpace = Show-CDriveSpace
 Report-CDriveSpace "Before Cleanup" $beforeSpace
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 1 — SYSTEM RESTORE POINTS
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 1 €” SYSTEM RESTORE POINTS
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase1_RestorePoints"
 Write-Log "Phase 1: Deleting System Restore Points..." "INFO"
 try {
@@ -338,9 +338,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 2 — ROGUE FOLDERS
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 2 €” ROGUE FOLDERS
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase2_RogueFolders"
 Write-Log "Phase 2: Deleting Rogue folders..." "INFO"
 try {
@@ -365,9 +365,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 3 — WINDOWS ERROR REPORTING
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 3 €” WINDOWS ERROR REPORTING
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase3_WER"
 Write-Log "Phase 3: Deleting Windows Error Reporting files..." "INFO"
 try {
@@ -377,7 +377,7 @@ try {
             Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
         Write-Log "Phase 3: WER files removed." "INFO"
     } else {
-        Write-Log "Phase 3: WER path not found — skipped." "INFO"
+        Write-Log "Phase 3: WER path not found €” skipped." "INFO"
     }
     Set-PhaseResult "Phase3_WER" "OK"
 }
@@ -388,9 +388,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 4 — SYSTEM TEMP / PREFETCH / MINIDUMP
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 4 €” SYSTEM TEMP / PREFETCH / MINIDUMP
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase4_SystemTemp"
 Write-Log "Phase 4: Removing System Temp, Prefetch, Minidump files..." "INFO"
 try {
@@ -406,9 +406,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 5 — USER PROFILE TEMP AND CACHE
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 5 €” USER PROFILE TEMP AND CACHE
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase5_UserProfiles"
 Write-Log "Phase 5: Removing User Profile Temp and Cache files..." "INFO"
 try {
@@ -437,7 +437,7 @@ try {
                     Where-Object { $_.LastWriteTime -lt $cutoff } |
                     ForEach-Object {
                         try   { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop }
-                        catch { <# locked file — skip silently #> }
+                        catch { <# locked file €” skip silently #> }
                     }
             }
             catch {
@@ -460,9 +460,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 6 — WINDOWS UPDATE / SOFTWARE DISTRIBUTION
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 6 €” WINDOWS UPDATE / SOFTWARE DISTRIBUTION
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase6_SoftwareDistribution"
 Write-Log "Phase 6: Removing Windows Update Downloads..." "INFO"
 try {
@@ -475,7 +475,7 @@ try {
     Start-ServiceSafe -Name 'wuauserv'
     Start-ServiceSafe -Name 'TrustedInstaller'
 
-    # Verify wuauserv came back — if not, that is a WARN not a FAIL
+    # Verify wuauserv came back €” if not, that is a WARN not a FAIL
     $wuStatus = (Get-Service -Name 'wuauserv' -ErrorAction SilentlyContinue).Status
     if ($wuStatus -ne 'Running') {
         Write-Log "Phase 6: wuauserv is '$wuStatus' after restart attempt." "WARN"
@@ -494,16 +494,16 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
-# PHASE 7 — CLEANMGR.EXE
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
+# PHASE 7 €” CLEANMGR.EXE
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Assert-TimeRemaining -Phase "Phase7_CleanMgr"
 Write-Log "Phase 7: Running Windows System Cleanup (CleanMgr.exe)..." "INFO"
 try {
     $cleanmgrPath = 'C:\Windows\System32\cleanmgr.exe'
 
     if (!(Test-Path $cleanmgrPath)) {
-        Write-Log "Phase 7: cleanmgr.exe not found — attempting install from WinSxS..." "WARN"
+        Write-Log "Phase 7: cleanmgr.exe not found €” attempting install from WinSxS..." "WARN"
         $winsxsExe = "$env:windir\winsxs\amd64_microsoft-windows-cleanmgr_31bf3856ad364e35_6.1.7600.16385_none_c9392808773cd7da\cleanmgr.exe"
         $winsxsMui = "$env:windir\winsxs\amd64_microsoft-windows-cleanmgr.resources_31bf3856ad364e35_6.1.7600.16385_en-us_b9cb6194b257cc63\cleanmgr.exe.mui"
         if (Test-Path $winsxsExe) { Copy-Item $winsxsExe "$env:windir\System32" -Force -ErrorAction SilentlyContinue }
@@ -540,7 +540,7 @@ try {
 
         $proc = Start-Process -FilePath $cleanmgrPath -ArgumentList $StateRun -WindowStyle Hidden -PassThru -ErrorAction Stop
         if (!$proc.WaitForExit($global:CleanMgrTimeoutSec * 1000)) {
-            Write-Log "Phase 7: CleanMgr.exe exceeded $($global:CleanMgrTimeoutSec)s — process killed." "WARN"
+            Write-Log "Phase 7: CleanMgr.exe exceeded $($global:CleanMgrTimeoutSec)s €” process killed." "WARN"
             $proc | Stop-Process -Force -ErrorAction SilentlyContinue
             Set-PhaseResult "Phase7_CleanMgr" "WARN:Killed after $($global:CleanMgrTimeoutSec)s timeout"
         }
@@ -554,7 +554,7 @@ try {
         }
     }
     else {
-        Write-Log "Phase 7: cleanmgr.exe not available after install attempt — skipped." "WARN"
+        Write-Log "Phase 7: cleanmgr.exe not available after install attempt €” skipped." "WARN"
         Set-PhaseResult "Phase7_CleanMgr" "WARN:cleanmgr.exe not found, phase skipped"
     }
 }
@@ -565,9 +565,9 @@ catch {
 }
 
 
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 # POST-CLEANUP SNAPSHOT & FINAL SUMMARY
-# ════════════════════════════════════════════════════════
+# ••••••••••••••••••••••••••••••••••••••••••••••••••••••••
 Write-Log "Checking C Drive space AFTER cleanup..." "INFO"
 $afterSpace = Show-CDriveSpace
 Report-CDriveSpace "After Cleanup" $afterSpace
@@ -577,12 +577,12 @@ Write-Log "Total Space Reclaimed : $reclaimed GB" "INFO"
 
 Invoke-FinalSummary
 
-# ─────────────────────────────────────────────
+# 
 # FINAL EXIT CODE
 #   0 = All phases OK (or only WARNs)
 #   1 = One or more phases FAILED
 #   2 = Script hit time budget (set by Assert-TimeRemaining)
-# ─────────────────────────────────────────────
+# 
 if ($global:FailureOccurred) {
     Write-Output "$(Get-Date) : CODE:FAIL"
     Write-Output "ACTION: Dispatch Ticket To L2"
