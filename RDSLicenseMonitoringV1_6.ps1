@@ -1,189 +1,6 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-# Version      : V1.9
-# Compatibility: PowerShell 5.1+  |  Windows Server 2016 / 2019 / 2022
-#
-# USAGE
-#   Single server   : -LicenseServerFQDN "amsdc1-s-7060.domain.com"
-#   Multiple servers: -LicenseServerFQDN "srv1.domain.com;srv2.domain.com"
-#
-#   *** CRITICAL -- HPSA / Camunda PARAMETER QUOTING ***
-#   The value passed for LicenseServerFQDN MUST be wrapped in double quotes
-#   in the HPSA job/parameter definition, e.g.:
-#       -LicenseServerFQDN "srv1.domain.com;srv2.domain.com;srv3.domain.com"
-#   If the semicolon-separated list is passed WITHOUT quotes, PowerShell's
-#   own command-line parser (not this script) splits on ';' BEFORE the
-#   script ever runs, and tries to execute "srv2.domain.com" etc. as a
-#   separate command -- producing errors like:
-#       "The term 'srv2.domain.com' is not recognized as the name of a
-#        cmdlet, function, script file, or operable program."
-#   This is an HPSA/Camunda job-configuration issue, not a script bug --
-#   fix it by quoting the parameter value at the call site.
-#
-# OUTPUT (written to $OutputDir)
-#   RDSLicenseMonitoring_<ServerName>_<timestamp>.html   (single server)
-#   RDSLicenseMonitoring_Combined_<timestamp>.html        (multiple servers)
-#
-# CHANGE LOG
-# ----------
-#  V1.9  (2026-07-01)  DIAGNOSTIC + CROSS-DOMAIN AUTH FIX -- "first server
-#        works, others empty" persisted even after V1.7 (sequential queries)
-#        and V1.8 (CIM datetime fix), with each server confirmed to work
-#        correctly when run individually.  This rules out threading, COM
-#        caching, and datetime-parsing as the cause -- the remaining
-#        explanation is environmental: the failing servers are in different
-#        AD domains (europe.shell.com / asia-pac.shell.com / americas.shell.com).
-#
-#        CHANGES IN THIS VERSION:
-#          1. -Authentication Negotiate is now forced on every New-CimSession
-#             call.  Without an explicit authentication mechanism, WSMan/DCOM
-#             can silently pick NTLM for one domain and Kerberos for another
-#             within the same process, and the failure can present as an
-#             empty/no-error result rather than a visible auth exception.
-#          2. Every failure at every stage (WSMan, DCOM, legacy WMI) now logs
-#             the FULL exception type and message per server, not just a
-#             generic warning -- so the actual blocking reason (access denied,
-#             RPC server unavailable, Kerberos realm mismatch, etc.) is
-#             visible in the HPSA log instead of being summarised away.
-#          3. If Installed=0 for a server after all attempts, an explicit
-#             ERROR-level banner line is printed pointing back at the issue
-#             list above it, so a scan of the log cannot miss a failed server.
-#          4. Every captured error message is now printed individually
-#             (previously only the COUNT of errors was logged, not their text).
-#
-#        NEXT STEP IF THIS STILL FAILS: re-run with all 3 servers and search
-#        the log for "[$Server] CIM (WSMan) FAILED" / "CIM (DCOM) FAILED" /
-#        "ALL THREE methods failed" for the failing servers -- the Detail=
-#        text on those lines will show the real blocking reason (commonly:
-#        WinRM not enabled on that server, firewall blocking RPC/WMI ports,
-#        the HPSA service account lacking rights in that domain, or a
-#        one-way/no trust relationship between the domains involved).
-#
-#  V1.8  (2026-06-30)  CRITICAL BUG FIX -- Expired packs still counted
-#        ROOT CAUSE: V1.7 switched to Get-CimInstance as the primary query
-#        method (to fix the multi-server data-loss bug).  Get-CimInstance
-#        returns WMI DATETIME properties ALREADY CONVERTED to .NET [datetime]
-#        objects, whereas Get-WmiObject returns them as raw WMI strings
-#        (e.g. "20380119031407.000000-000").  ConvertFrom-WmiExpiry assumed
-#        the raw string format unconditionally: every call site forced
-#        [string]$pack.ExpirationDate before passing it in, which stringifies
-#        a .NET DateTime using the current culture (e.g. "06/30/2024 00:00:00")
-#        instead of the WMI format.  Substring(0,14) on that culture-formatted
-#        string does not match "yyyyMMddHHmmss", ParseExact throws, and the
-#        catch block silently returned $null ("Never expires") for every
-#        single pack queried via CIM -- meaning NO pack was ever correctly
-#        identified as expired after the V1.7 CIM-first change, regardless
-#        of its real expiration date.
-#
-#        FIX: ConvertFrom-WmiExpiry now accepts the value as untyped [object]
-#        and branches on the actual .NET type at runtime:
-#          - if it is already a [datetime] (CIM) -- use it directly
-#          - if it is a string (legacy WMI)        -- parse with the original
-#            yyyyMMddHHmmss logic
-#        All three call sites updated to pass $pack.ExpirationDate RAW,
-#        without a premature [string] cast, so the type-detection works.
-#        Added a [RAW] diagnostic log line per pack showing the raw value
-#        and its .NET type, so any future WMI/CIM behaviour change is
-#        immediately visible in the HPSA log instead of silently swallowed.
-#
-#  V1.7  (2026-06-27)  BUG FIX -- Multi-server STILL returned data for only
-#        the first server after V1.6 made queries sequential.  This ruled out
-#        thread/COM-apartment contention (the V1.6 theory) since sequential
-#        execution still failed identically.
-#
-#        ROOT CAUSE (confirmed): legacy Get-WmiObject -ComputerName uses
-#        DCOM under the hood, and DCOM remote connections are cached/pooled
-#        by the underlying Windows RPC layer for the lifetime of the
-#        PowerShell process -- NOT just for the lifetime of a single
-#        runspace/thread.  When the script calls Get-WmiObject for server #1
-#        successfully, the OS can reuse that cached DCOM binding/auth context
-#        for the NEXT Get-WmiObject call even though -ComputerName points to
-#        a different server, causing the 2nd/3rd calls to silently return
-#        empty results instead of an error (so no exception was ever thrown
-#        or logged -- it just looked like "no data").
-#
-#        FIX: Get-KeyPacks and Get-OSVersion now try, in order:
-#          1. Get-CimInstance over WSMan (New-CimSession, no -SessionOption)
-#             -- explicit, isolated session per server; no DCOM connection
-#             pooling involved at all.  This is the modern, recommended
-#             replacement for Get-WmiObject and is tried FIRST.
-#          2. Get-CimInstance over DCOM (New-CimSessionOption -Protocol Dcom)
-#             -- for hosts with WMI/DCOM but no WinRM listener.  Still uses
-#             an explicit per-call CimSession object (disposed immediately
-#             after use), which does not exhibit the same caching behaviour
-#             as Get-WmiObject.
-#          3. Legacy Get-WmiObject -- kept only as a last-resort fallback.
-#        Every CimSession is created fresh per server and disposed in a
-#        finally block immediately after use, eliminating any possibility
-#        of state leaking from one server's query into the next.
-#
-#  V1.6  (2026-06-27)  Removed RunspacePool / parallel execution (see below)
-#        the first server; servers 2, 3, ... came back empty.
-#
-#        ROOT CAUSE: the parallel RunspacePool ran every server's WMI/CIM
-#        query concurrently on separate threads (ApartmentState = MTA).
-#        Get-WmiObject and the CIM/DCOM fallback both go through COM
-#        interop under the hood, and COM enforces per-thread apartment
-#        rules.  WMI/DCOM calls are only reliable from a Single-Threaded
-#        Apartment (STA); under MTA, only the first runspace to touch a
-#        COM object on the process reliably gets real data -- every other
-#        concurrent runspace silently receives empty/null results.  This
-#        exactly matched the reported symptom: server #1 worked, the rest
-#        came back empty, but each one worked fine when run individually
-#        (i.e. on its own thread, with no concurrent COM contention).
-#
-#        FIX: removed the RunspacePool entirely.  Multiple servers are now
-#        queried SEQUENTIALLY using the exact same Invoke-LicenseServerReport
-#        call already used (and proven reliable) for the single-server path.
-#        This guarantees every server is queried correctly and consistently,
-#        at the cost of total run time scaling with server count rather than
-#        being capped at the slowest single server.  For RDS license checks
-#        (a handful of fast WMI calls per server) this is a negligible
-#        trade-off and far preferable to silently missing data.
-#
-#  V1.5.2 (2026-06-27)  BUG FIX -- Mandatory $ErrorLog binding error
-#        [Parameter(Mandatory)] on $ErrorLog in Get-KeyPacks and Get-OSVersion
-#        caused PowerShell's parameter binder to reject a valid (but empty)
-#        List[string] with "Cannot bind argument to parameter 'ErrorLog' because
-#        it is an empty collection."  $ErrorLog is an output-collector passed by
-#        the caller -- it must never be Mandatory.  Removed [Parameter(Mandatory)]
-#        from $ErrorLog in both functions; [Parameter(Mandatory)] kept on $Server.
-#
-#  V1.5.1 (2026-05-28)  PARSE ERROR FIX
-#        $function:Write-Log syntax fails at parse time when the function name
-#        contains a hyphen -- PowerShell's variable namespace syntax does not
-#        allow hyphens in the identifier after the colon.  All six $function:X
-#        references replaced with (Get-Command X).ScriptBlock.ToString() which
-#        works correctly for any function name regardless of punctuation.
-#
-#  V1.5  (2026-05-28)  BUG FIXES -- verified clean execution
-#        FIX 1  EscapeJson backslash regex was wrong.
-#               '-replace "\\","\\\"' only matched one backslash (regex `\` = literal \)
-#               and produced one backslash in output.  Fixed to use [string]::Replace()
-#               for the backslash pass (literal replace, no regex) then -replace for
-#               the remaining characters which do not need regex escaping.
-#        FIX 2  RunspacePool: AddScript({scriptblock})+AddParameters() does NOT bind
-#               named params -- parameters were silently $null in every job.
-#               Fixed: pass a plain [string] script to AddScript, call AddArgument()
-#               for each value in the correct order.
-#        FIX 3  Invoke-Expression "function X { $body }" expands $-variables and
-#               backticks inside $body during string interpolation, corrupting function
-#               bodies that contain either.  Fixed: use Set-Item with ScriptBlock::Create.
-#        FIX 4  $global:WarningThresholdPct / $global:CriticalThresholdPct inside
-#               runspaces set runspace-global state unnecessarily.  Fixed: use plain
-#               local variables $WarningThresholdPct / $CriticalThresholdPct which are
-#               in scope within the runspace script string.
-#        FIX 5  Nested 'exit 3' inside inner try block for folder creation bypassed
-#               outer catch logging.  Fixed: use 'throw' to propagate to outer catch.
-#        FIX 6  Dead comment block "EMBEDDED HTML TEMPLATE" removed.
-#        CLEAN  Consistent 4-space indentation throughout; aligned parameter blocks;
-#               region labels verified to match #region/#endregion pairs exactly.
-#
-#  V1.4  (2026-05-27)  Structural rewrite -- regions, parallel RunspacePool, try/catch
-#  V1.3  (2026-05-27)  Unified HTML template (single Get-UnifiedTemplate)
-#  V1.2  (2026-05-27)  Bug fix: expired key pack exclusion
-#  V1.1  Initial release
 ############################################################################################################
 
 #region PARAMETERS
@@ -200,15 +17,12 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.9"
+$ScriptVersion        = "V1.5.2"
 #endregion CONFIG
 
 
 #region HELPERS
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Write-Log  --  timestamped, colour-coded console line
-# ─────────────────────────────────────────────────────────────────────────────
 function Write-Log {
     param(
         [Parameter(Mandatory)][string]$Msg,
@@ -223,11 +37,6 @@ function Write-Log {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][$Lvl] $Msg" -ForegroundColor $col
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# EscapeJson  --  makes a value safe to embed inside a JSON string literal.
-# FIX 1: backslash handled with [string]::Replace (literal, no regex);
-#        remaining chars use -replace (regex is safe because none need escaping).
-# ─────────────────────────────────────────────────────────────────────────────
 function EscapeJson {
     param([string]$s)
     if ([string]::IsNullOrEmpty($s)) { return "" }
@@ -241,9 +50,6 @@ function EscapeJson {
     return $s
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Get-Compliance  --  maps a usage % to a compliance label
-# ─────────────────────────────────────────────────────────────────────────────
 function Get-Compliance {
     param([double]$Pct)
     if ($Pct -ge $CriticalThresholdPct) { return "CRITICAL"  }
@@ -251,61 +57,22 @@ function Get-Compliance {
     return "COMPLIANT"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ConvertFrom-WmiExpiry  --  safely parses a WMI datetime string.
-# Returns [datetime] UTC when a real future-or-past date is found.
-# Returns $null for null/empty input OR for the WMI "Never" epoch (year <= 1970).
-# ─────────────────────────────────────────────────────────────────────────────
 function ConvertFrom-WmiExpiry {
-    <#
-    .SYNOPSIS
-        Safely converts a Win32_TSLicenseKeyPack.ExpirationDate value to UTC.
-    .NOTES
-        CRITICAL: Get-CimInstance and Get-WmiObject return ExpirationDate in
-        TWO DIFFERENT .NET TYPES:
-          - Get-WmiObject  returns the raw WMI string, e.g. "20380119031407.000000-000"
-          - Get-CimInstance returns an ALREADY-CONVERTED [datetime] .NET object
-        The previous version always called [string]$pack.ExpirationDate and tried
-        to Substring(0,14) it as if it were the raw WMI string format.  When the
-        value came from CIM, [string] of a DateTime produces something like
-        "06/30/2024 00:00:00" (current-culture format) -- Substring(0,14) on that
-        does not match "yyyyMMddHHmmss" at all, ParseExact throws, the catch block
-        swallows the error, and the function silently returns $null ("Never").
-        This caused EVERY expired pack queried via CIM to be wrongly treated as
-        non-expiring, so expired packs kept being counted toward the totals.
-        FIX: accept the parameter as [object] and branch on its actual .NET type
-        before attempting any parsing.
-    #>
-    param($Raw)
-
-    if ($null -eq $Raw) { return $null }
-
-    # Case 1: CIM already gave us a real [datetime] -- use it directly, no parsing.
-    if ($Raw -is [datetime]) {
-        $dt = [datetime]$Raw
-        if ($dt.Year -le 1970) { return $null }   # WMI "Never expires" sentinel
-        return $dt.ToUniversalTime()
-    }
-
-    # Case 2: legacy Get-WmiObject gives us the raw WMI string format.
-    $RawStr = [string]$Raw
-    if ([string]::IsNullOrWhiteSpace($RawStr)) { return $null }
-
+    param([string]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
     try {
-        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU -- take first 14 chars
-        if ($RawStr.Length -lt 14) { return $null }
-        $datePart = $RawStr.Substring(0, 14)
+        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU  -- take first 14 chars
+        $datePart = $Raw.Substring(0, 14)
         $dt = [datetime]::ParseExact(
                   $datePart,
                   'yyyyMMddHHmmss',
                   [System.Globalization.CultureInfo]::InvariantCulture,
                   [System.Globalization.DateTimeStyles]::AssumeUniversal)
-        if ($dt.Year -le 1970) { return $null }   # WMI "Never expires" sentinel
+        # Year <= 1970 is the WMI "Never expires" sentinel value
+        if ($dt.Year -le 1970) { return $null }
         return $dt.ToUniversalTime()
     } catch {
-        # Genuinely unparseable -- treat as non-expiring to avoid false exclusions,
-        # but log it so it is visible instead of silently disappearing.
-        Write-Log "  ConvertFrom-WmiExpiry: could not parse raw value '$RawStr' (type=$($Raw.GetType().Name))" "WARN"
+        # Unparseable date -- treat as non-expiring to avoid false exclusions
         return $null
     }
 }
@@ -317,10 +84,6 @@ function ConvertFrom-WmiExpiry {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Get-UnifiedTemplate
-# Returns one self-contained HTML page used for both single and multi-server.
-# At runtime the JavaScript detects which variable was injected:
-#   window.REPORT_DATA   -> single server  (set by Save-Report)
-#   window.COMBINED_DATA -> multiple servers (set by Save-Report)
 # ─────────────────────────────────────────────────────────────────────────────
 function Get-UnifiedTemplate {
     return @'
@@ -769,8 +532,7 @@ function Get-UnifiedTemplate {
 #region REPORT WRITERS
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Save-Report  --  unified entry point for single and multi-server HTML output.
-# Writes window.REPORT_DATA (1 result) or window.COMBINED_DATA (2+ results).
+# Save-Report  - for single and multi-server HTML output.
 # ─────────────────────────────────────────────────────────────────────────────
 function Save-Report {
     param(
@@ -887,147 +649,87 @@ window.COMBINED_DATA = {
 
 #region DATA COLLECTION
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Get-KeyPacks  --  queries Win32_TSLicenseKeyPack from a remote server.
-# Tries WMI first (faster); falls back to CIM over DCOM.
-# CimSession is always disposed in the finally block (no session leaks).
-# Returns an array (may be empty); never throws.
-# ─────────────────────────────────────────────────────────────────────────────
 function Get-KeyPacks {
     param(
         [Parameter(Mandatory)][string]$Server,
         [System.Collections.Generic.List[string]]$ErrorLog
     )
 
-    # NOTE: if your servers span multiple AD domains/forests (e.g.
-    # europe.shell.com, asia-pac.shell.com, americas.shell.com), CIM/WMI
-    # authentication is evaluated independently per server -- there is no
-    # shared state between calls in THIS function.  If server #1 succeeds
-    # and #2/#3 fail when run together but succeed when run alone, the most
-    # likely cause is a Kerberos/cross-domain authentication issue specific
-    # to where this script executes from (the HPSA agent), not the script
-    # logic.  -Authentication Negotiate is forced below to avoid silent
-    # NTLM-vs-Kerberos fallback mismatches between domains.
-
-    # Attempt 1: CIM over WSMan (explicit, isolated session per server)
-    $cimSess = $null
-    try {
-        $cimSess = New-CimSession -ComputerName $Server -Authentication Negotiate -ErrorAction Stop
-        $packs   = @(Get-CimInstance -CimSession $cimSess `
-                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        Write-Log "  [$Server] CIM (WSMan) OK -- $($packs.Count) key pack(s)" "SUCCESS"
-        return $packs
-    } catch {
-        $errDetail = $_.Exception.Message
-        $errType   = $_.Exception.GetType().FullName
-        Write-Log "  [$Server] CIM (WSMan) FAILED -- Type=$errType | Detail=$errDetail" "WARN"
-    } finally {
-        if ($null -ne $cimSess) {
-            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    # Attempt 2: CIM over DCOM (for hosts without WinRM enabled)
-    $cimSess = $null
-    try {
-        $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $Server -SessionOption $cimOpts `
-                       -Authentication Negotiate -ErrorAction Stop
-        $packs   = @(Get-CimInstance -CimSession $cimSess `
-                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        Write-Log "  [$Server] CIM (DCOM) OK -- $($packs.Count) key pack(s)" "SUCCESS"
-        return $packs
-    } catch {
-        $errDetail = $_.Exception.Message
-        $errType   = $_.Exception.GetType().FullName
-        Write-Log "  [$Server] CIM (DCOM) FAILED -- Type=$errType | Detail=$errDetail" "WARN"
-    } finally {
-        if ($null -ne $cimSess) {
-            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    # Attempt 3: legacy Get-WmiObject (last resort)
+    # Attempt 1: WMI (fastest path) ──────────────────────────────────────────
     try {
         $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
                        -ComputerName $Server -ErrorAction Stop)
-        Write-Log "  [$Server] Legacy WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        Write-Log "  WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
         return $packs
     } catch {
-        $errDetail = $_.Exception.Message
-        $errType   = $_.Exception.GetType().FullName
-        $msg = "[$Server] ALL THREE methods failed. Last error: Type=$errType | Detail=$errDetail"
+        Write-Log "  WMI failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+    }
+
+    # Attempt 2: CIM over DCOM (fallback) ────────────────────────────────────
+    $cimSess = $null
+    try {
+        $cimOpts = New-CimSessionOption -Protocol Dcom
+        $cimSess = New-CimSession -ComputerName $Server `
+                       -SessionOption $cimOpts -ErrorAction Stop
+        $packs   = @(Get-CimInstance -CimSession $cimSess `
+                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
+        Write-Log "  CIM OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        return $packs
+    } catch {
+        $msg = "[$Server] unreachable via WMI and CIM: $($_.Exception.Message)"
         $ErrorLog.Add($msg)
         Write-Log "  $msg" "ERROR"
         return @()
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Get-OSVersion  --  retrieves Win32_OperatingSystem.Caption from a server.
-# Tries WMI first; falls back to CIM over DCOM.
-# Returns "N/A" on total failure; never throws.
-# ─────────────────────────────────────────────────────────────────────────────
 function Get-OSVersion {
     param(
         [Parameter(Mandatory)][string]$Server,
         [System.Collections.Generic.List[string]]$ErrorLog
     )
 
-    # Attempt 1: CIM over WSMan (explicit per-server session)
-    $cimSess = $null
-    try {
-        $cimSess = New-CimSession -ComputerName $Server -Authentication Negotiate -ErrorAction Stop
-        $os      = Get-CimInstance -CimSession $cimSess `
-                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
-        return "$($os.Caption)".Trim()
-    } catch {
-        Write-Log "  [$Server] CIM (WSMan) OS query FAILED -- Detail=$($_.Exception.Message)" "WARN"
-    } finally {
-        if ($null -ne $cimSess) {
-            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    # Attempt 2: CIM over DCOM
-    $cimSess = $null
-    try {
-        $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $Server -SessionOption $cimOpts `
-                       -Authentication Negotiate -ErrorAction Stop
-        $os      = Get-CimInstance -CimSession $cimSess `
-                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
-        return "$($os.Caption)".Trim()
-    } catch {
-        Write-Log "  [$Server] CIM (DCOM) OS query FAILED -- Detail=$($_.Exception.Message)" "WARN"
-    } finally {
-        if ($null -ne $cimSess) {
-            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-
-    # Attempt 3: legacy WMI (last resort)
+    # Attempt 1: WMI ─────────────────────────────────────────────────────────
     try {
         $os = Get-WmiObject -Class "Win32_OperatingSystem" `
                   -ComputerName $Server -ErrorAction Stop
         return "$($os.Caption)".Trim()
     } catch {
-        $msg = "Could not retrieve OS version for [$Server] via CIM (WSMan), CIM (DCOM) or legacy WMI: $($_.Exception.Message)"
+        Write-Log "  WMI OS query failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+    }
+
+    # Attempt 2: CIM over DCOM ───────────────────────────────────────────────
+    $cimSess = $null
+    try {
+        $cimOpts = New-CimSessionOption -Protocol Dcom
+        $cimSess = New-CimSession -ComputerName $Server `
+                       -SessionOption $cimOpts -ErrorAction Stop
+        $os      = Get-CimInstance -CimSession $cimSess `
+                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
+        return "$($os.Caption)".Trim()
+    } catch {
+        $msg = "Could not retrieve OS version for [$Server]: $($_.Exception.Message)"
         $ErrorLog.Add($msg)
         Write-Log "  $msg" "WARN"
         return "N/A"
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
     }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Invoke-LicenseServerReport  --  full data collection for one license server.
-# Returns a PSCustomObject.  Never throws; all errors captured in Errors list.
+# LicenseServerReport  --  full data collection for one license server.
 # ─────────────────────────────────────────────────────────────────────────────
 function Invoke-LicenseServerReport {
     param([Parameter(Mandatory)][string]$Server)
 
-    Write-Log "=================================================================" "INFO"
-    Write-Log "--- [$Server] Starting ---" "INFO"
+    Write-Log "--- [$Server] Starting ---"
     $ErrorLog = [System.Collections.Generic.List[string]]::new()
 
     # 1. Query key packs ──────────────────────────────────────────────────────
@@ -1057,13 +759,6 @@ function Invoke-LicenseServerReport {
 
         foreach ($pack in $KeyPacks) {
 
-            # Diagnostic: log the raw ExpirationDate value and its .NET type
-            # for every pack so any future mismatch is immediately visible
-            # in the HPSA log rather than silently swallowed.
-            $rawExpType = if ($null -eq $pack.ExpirationDate) { "null" } else { $pack.ExpirationDate.GetType().Name }
-            Write-Log ("  [RAW] {0} | KeyPackType={1} | ExpirationDate='{2}' (type={3})" -f `
-                $pack.Description, $pack.KeyPackType, $pack.ExpirationDate, $rawExpType) "INFO"
-
             # Step 1 -- exclude unlimited / built-in packs
             $tl = [int64]$pack.TotalLicenses
             if ($tl -eq -1 -or $tl -eq 4294967295) {
@@ -1079,12 +774,7 @@ function Invoke-LicenseServerReport {
             }
 
             # Step 3 -- exclude expired by ExpirationDate
-            # IMPORTANT: pass $pack.ExpirationDate RAW (no [string] cast) so
-            # ConvertFrom-WmiExpiry can detect whether CIM already converted
-            # it to a [datetime] or whether it is still the raw WMI string.
-            # Forcing [string] here was the root cause of expired packs being
-            # silently treated as "Never expires" -- see function comment.
-            $expiry = ConvertFrom-WmiExpiry -Raw $pack.ExpirationDate
+            $expiry = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
             if ($null -ne $expiry -and $expiry -lt $NowUtc) {
                 $ExpiredCount++
                 Write-Log ("  [SKIP-EXPIRED-DATE] {0} | Expiry={1:yyyy-MM-dd}" -f `
@@ -1114,10 +804,10 @@ function Invoke-LicenseServerReport {
 
         # Audit log -- one line per active pack that contributes to totals
         foreach ($pack in $ActivePacks) {
-            $expStr = if ($null -eq $pack.ExpirationDate) {
+            $expStr = if ([string]::IsNullOrWhiteSpace([string]$pack.ExpirationDate)) {
                           "Never"
                       } else {
-                          $dt = ConvertFrom-WmiExpiry -Raw $pack.ExpirationDate
+                          $dt = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
                           if ($null -ne $dt) { $dt.ToString("yyyy-MM-dd") } else { "Never" }
                       }
             Write-Log ("  [ACTIVE] {0} | Total={1} | Issued={2} | Available={3} | Expiry={4}" -f `
@@ -1148,15 +838,7 @@ function Invoke-LicenseServerReport {
 
     Write-Log ("  Result: {0}/{1} ({2}%) => {3}" -f $Issued, $Installed, $UsagePct, $Compliance)
     if ($ErrorLog.Count -gt 0) {
-        Write-Log "  [$Server] $($ErrorLog.Count) issue(s) captured -- printing each below:" "WARN"
-        $i = 0
-        foreach ($e in $ErrorLog) {
-            $i++
-            Write-Log "    [$Server] Issue ${i}: $e" "WARN"
-        }
-    }
-    if ($Installed -eq 0) {
-        Write-Log "  [$Server] *** WARNING: Installed=0 -- this server returned NO usable license data. Check the issues listed above for the exact cause. ***" "ERROR"
+        Write-Log "  $($ErrorLog.Count) issue(s) captured for [$Server]" "WARN"
     }
     Write-Log "--- [$Server] Complete ---"
 
@@ -1176,10 +858,6 @@ function Invoke-LicenseServerReport {
 
 
 #region MAIN
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN  --  parse server list, query servers, save HTML report.
-# Entire block is wrapped in try/catch so HPSA always gets a clean exit code.
-# ─────────────────────────────────────────────────────────────────────────────
 try {
 
     Write-Log "================================================================="
@@ -1226,40 +904,111 @@ try {
         }
 
     } else {
-        # Multiple servers -- SEQUENTIAL queries.
-        #
-        # WHY NOT PARALLEL (RunspacePool):  Get-WmiObject and the CIM/DCOM
-        # fallback both go through COM under the hood.  COM has per-thread
-        # apartment rules: WMI/DCOM calls are reliable only from a Single-
-        # Threaded Apartment (STA).  A RunspacePool's worker threads default
-        # to MTA, and even forcing ApartmentState="MTA" does not fix the
-        # underlying issue -- only the FIRST runspace to touch a given COM
-        # object on a given thread sequence reliably gets real data back;
-        # every other concurrent runspace silently receives empty / null
-        # results from Get-WmiObject and New-CimSession.  That exactly
-        # matches the symptom reported: server #1 populated, #2/#3 empty.
-        #
-        # Querying sequentially (one server at a time, same thread) uses the
-        # exact same code path that already works correctly for a single
-        # server, so every server is queried identically and reliably.
-        Write-Log "Querying $($ServerList.Count) server(s) sequentially..." "INFO"
+        # Multiple servers -- parallel RunspacePool (run time = slowest server)
+        Write-Log "Starting parallel queries ($($ServerList.Count) threads)..." "INFO"
 
-        foreach ($srv in $ServerList) {
-            try {
-                $result = Invoke-LicenseServerReport -Server $srv
-                if ($null -ne $result) {
-                    $ServerResults.Add($result)
-                } else {
-                    $FailedServers.Add($srv)
-                    Write-Log "No result returned for [$srv]" "ERROR"
+        $Pool = $null
+        try {
+            $Pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(
+                        1, $ServerList.Count)
+            $Pool.ApartmentState = "MTA"
+            $Pool.Open()
+
+            # Serialise each function body as a plain string so it can be
+            # safely injected into the runspace script without expansion issues.
+            # FIX 2+3: use AddScript([string]) + AddArgument(); use
+            #           Set-Item function:\ inside the runspace to define
+            #           functions without Invoke-Expression string-expansion bugs.
+            # $function:Name syntax does not support hyphens in PowerShell.
+            # Use (Get-Command Name).ScriptBlock.ToString() instead -- always works.
+            $fnBodies = @{
+                WriteLog    = (Get-Command Write-Log).ScriptBlock.ToString()
+                GetComp     = (Get-Command Get-Compliance).ScriptBlock.ToString()
+                WmiExpiry   = (Get-Command ConvertFrom-WmiExpiry).ScriptBlock.ToString()
+                GetKeyPacks = (Get-Command Get-KeyPacks).ScriptBlock.ToString()
+                GetOsVer    = (Get-Command Get-OSVersion).ScriptBlock.ToString()
+                Invoke      = (Get-Command Invoke-LicenseServerReport).ScriptBlock.ToString()
+            }
+
+            $Jobs = [System.Collections.Generic.List[object]]::new()
+
+            # Runspace script as a plain string (no scriptblock literal) so
+            # AddArgument values are not subject to outer-scope expansion.
+            $runspaceScript = @'
+param(
+    [string]$Server,
+    [int]   $Warn,
+    [int]   $Crit,
+    [string]$fnWriteLog,
+    [string]$fnGetComp,
+    [string]$fnWmiExpiry,
+    [string]$fnGetKeyPacks,
+    [string]$fnGetOsVer,
+    [string]$fnInvoke
+)
+# Define functions safely using Set-Item (no string-expansion risk)
+Set-Item -Path function:Write-Log              -Value ([ScriptBlock]::Create($fnWriteLog))
+Set-Item -Path function:Get-Compliance         -Value ([ScriptBlock]::Create($fnGetComp))
+Set-Item -Path function:ConvertFrom-WmiExpiry  -Value ([ScriptBlock]::Create($fnWmiExpiry))
+Set-Item -Path function:Get-KeyPacks           -Value ([ScriptBlock]::Create($fnGetKeyPacks))
+Set-Item -Path function:Get-OSVersion          -Value ([ScriptBlock]::Create($fnGetOsVer))
+Set-Item -Path function:Invoke-LicenseServerReport -Value ([ScriptBlock]::Create($fnInvoke))
+# Threshold variables in local scope (visible to all functions via script scope)
+$WarningThresholdPct  = $Warn
+$CriticalThresholdPct = $Crit
+Invoke-LicenseServerReport -Server $Server
+'@
+
+            foreach ($srv in $ServerList) {
+                $ps = [System.Management.Automation.PowerShell]::Create()
+                $ps.RunspacePool = $Pool
+                # AddScript([string]) + AddArgument() = correct param binding
+                [void]$ps.AddScript($runspaceScript)
+                [void]$ps.AddArgument($srv)
+                [void]$ps.AddArgument($WarningThresholdPct)
+                [void]$ps.AddArgument($CriticalThresholdPct)
+                [void]$ps.AddArgument($fnBodies.WriteLog)
+                [void]$ps.AddArgument($fnBodies.GetComp)
+                [void]$ps.AddArgument($fnBodies.WmiExpiry)
+                [void]$ps.AddArgument($fnBodies.GetKeyPacks)
+                [void]$ps.AddArgument($fnBodies.GetOsVer)
+                [void]$ps.AddArgument($fnBodies.Invoke)
+
+                $handle = $ps.BeginInvoke()
+                $Jobs.Add([PSCustomObject]@{ PS = $ps; Handle = $handle; Server = $srv })
+            }
+
+            # Collect results in submission order
+            foreach ($job in $Jobs) {
+                try {
+                    $result = $job.PS.EndInvoke($job.Handle)
+                    if ($job.PS.HadErrors) {
+                        $job.PS.Streams.Error |
+                            ForEach-Object { Write-Log "  [RunspaceErr][$($job.Server)] $_" "WARN" }
+                    }
+                    if ($null -ne $result -and $result.Count -gt 0) {
+                        $ServerResults.Add($result[0])
+                    } else {
+                        $FailedServers.Add($job.Server)
+                        Write-Log "No result returned for [$($job.Server)]" "ERROR"
+                    }
+                } catch {
+                    $FailedServers.Add($job.Server)
+                    Write-Log "Job failed [$($job.Server)]: $($_.Exception.Message)" "ERROR"
+                } finally {
+                    try { $job.PS.Dispose() } catch {}
                 }
-            } catch {
-                $FailedServers.Add($srv)
-                Write-Log "Query failed for [$srv]: $($_.Exception.Message)" "ERROR"
+            }
+
+        } finally {
+            # Pool always closed even if a job throws
+            if ($null -ne $Pool) {
+                try { $Pool.Close();   } catch {}
+                try { $Pool.Dispose(); } catch {}
             }
         }
 
-        Write-Log "Sequential queries complete." "SUCCESS"
+        Write-Log "Parallel queries complete." "SUCCESS"
     }
 
     # ── Summary ──────────────────────────────────────────────────────────────
