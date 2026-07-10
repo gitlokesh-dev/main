@@ -1,14 +1,14 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
+
 ############################################################################################################
 
-#region PARAMETERS
 param(
+    # One server FQDN, or several separated by semicolons (e.g. "srv1;srv2;srv3").
     [Parameter(Mandatory = $true)]
     [string]$LicenseServerFQDN
 )
-#endregion PARAMETERS
 
 
 #region CONFIG
@@ -17,37 +17,46 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.5.2"
+$ScriptVersion        = "V1.6.0"
 #endregion CONFIG
 
 
 #region HELPERS
 
+# Writes a timestamped, colour-coded line to the console (visible to HPSA).
 function Write-Log {
     param(
         [Parameter(Mandatory)][string]$Msg,
         [ValidateSet("INFO","SUCCESS","WARN","ERROR")][string]$Lvl = "INFO"
     )
-    $col = switch ($Lvl) {
-        "SUCCESS" { "Green"  }
-        "WARN"    { "Yellow" }
-        "ERROR"   { "Red"    }
-        default   { "Cyan"   }
+    try {
+        $col = switch ($Lvl) {
+            "SUCCESS" { "Green"  }
+            "WARN"    { "Yellow" }
+            "ERROR"   { "Red"    }
+            default   { "Cyan"   }
+        }
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][$Lvl] $Msg" -ForegroundColor $col
+    } catch {
+        Write-Host "[$Lvl] $Msg"
     }
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][$Lvl] $Msg" -ForegroundColor $col
 }
 
 function EscapeJson {
     param([string]$s)
     if ([string]::IsNullOrEmpty($s)) { return "" }
-    # Step 1: backslash -- literal replace FIRST (must precede the quote replace)
-    $s = $s.Replace('\', '\\')
-    # Step 2: remaining JSON special characters
-    $s = $s -replace '"',    '\"'  `
-            -replace "`r`n", '\n'  `
-            -replace "`n",   '\n'  `
-            -replace "`t",   '\t'
-    return $s
+    try {
+        # Backslash must be escaped first, before any other replace below.
+        $s = $s.Replace('\', '\\')
+        $s = $s -replace '"',    '\"'  `
+                -replace "`r`n", '\n'  `
+                -replace "`n",   '\n'  `
+                -replace "`t",   '\t'
+        return $s
+    } catch {
+        Write-Log "EscapeJson failed for input value -- returning empty string." "WARN"
+        return ""
+    }
 }
 
 function Get-Compliance {
@@ -61,18 +70,16 @@ function ConvertFrom-WmiExpiry {
     param([string]$Raw)
     if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
     try {
-        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU  -- take first 14 chars
         $datePart = $Raw.Substring(0, 14)
         $dt = [datetime]::ParseExact(
                   $datePart,
                   'yyyyMMddHHmmss',
                   [System.Globalization.CultureInfo]::InvariantCulture,
                   [System.Globalization.DateTimeStyles]::AssumeUniversal)
-        # Year <= 1970 is the WMI "Never expires" sentinel value
+        # Year <= 1970 is the WMI "Never expires" sentinel value.
         if ($dt.Year -le 1970) { return $null }
         return $dt.ToUniversalTime()
     } catch {
-        # Unparseable date -- treat as non-expiring to avoid false exclusions
         return $null
     }
 }
@@ -80,11 +87,206 @@ function ConvertFrom-WmiExpiry {
 #endregion HELPERS
 
 
+#region DATA COLLECTION
+
+function Get-KeyPacks {
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [System.Collections.Generic.List[string]]$ErrorLog
+    )
+
+    # Attempt 1: WMI (fastest path)
+    try {
+        $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
+                       -ComputerName $Server -ErrorAction Stop)
+        Write-Log "  WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        return $packs
+    } catch {
+        Write-Log "  WMI failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+    }
+
+    $cimSess = $null
+    try {
+        $cimOpts = New-CimSessionOption -Protocol Dcom
+        $cimSess = New-CimSession -ComputerName $Server `
+                       -SessionOption $cimOpts -ErrorAction Stop
+        $packs   = @(Get-CimInstance -CimSession $cimSess `
+                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
+        Write-Log "  CIM OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        return $packs
+    } catch {
+        $msg = "[$Server] unreachable via WMI and CIM: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "ERROR"
+        return @()
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+}
+function Get-OSVersion {
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [System.Collections.Generic.List[string]]$ErrorLog
+    )
+
+    # Attempt 1: WMI
+    try {
+        $os = Get-WmiObject -Class "Win32_OperatingSystem" `
+                  -ComputerName $Server -ErrorAction Stop
+        return "$($os.Caption)".Trim()
+    } catch {
+        Write-Log "  WMI OS query failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+    }
+
+    # Attempt 2: CIM over DCOM
+    $cimSess = $null
+    try {
+        $cimOpts = New-CimSessionOption -Protocol Dcom
+        $cimSess = New-CimSession -ComputerName $Server `
+                       -SessionOption $cimOpts -ErrorAction Stop
+        $os      = Get-CimInstance -CimSession $cimSess `
+                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
+        return "$($os.Caption)".Trim()
+    } catch {
+        $msg = "Could not retrieve OS version for [$Server]: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "WARN"
+        return "N/A"
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+}
+function Invoke-LicenseServerReport {
+    param([Parameter(Mandatory)][string]$Server)
+
+    Write-Log "--- [$Server] Starting ---"
+    $ErrorLog = [System.Collections.Generic.List[string]]::new()
+
+    # 1. Query key packs
+    $KeyPacks = Get-KeyPacks -Server $Server -ErrorLog $ErrorLog
+
+    if ($KeyPacks.Count -eq 0) {
+        $ErrorLog.Add("[$Server] Zero key packs returned. Verify the RD Licensing role is installed, packs are activated, and the service account has WMI/CIM access.")
+        Write-Log "  Zero key packs returned from [$Server]" "WARN"
+    }
+
+    # 2. Query OS version (runs regardless of key pack success)
+    $OSVersion = Get-OSVersion -Server $Server -ErrorLog $ErrorLog
+
+    # 3. Filter key packs and calculate CAL totals
+    [int64]$Installed      = 0
+    [int64]$Issued         = 0
+    [int64]$Available      = 0
+    $UnlimitedCount        = 0
+    $ExpiredCount          = 0
+    $DuplicateCount        = 0
+    $ActivePacks           = [System.Collections.Generic.List[object]]::new()
+
+    try {
+        $NowUtc         = [datetime]::UtcNow
+        $SeenSignatures = [System.Collections.Generic.HashSet[string]]::new(
+                              [System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($pack in $KeyPacks) {
+
+            $tl = [int64]$pack.TotalLicenses
+            if ($tl -eq -1 -or $tl -eq 4294967295) {
+                $UnlimitedCount++
+                continue
+            }
+            if ([int]$pack.KeyPackType -eq 6) {
+                $ExpiredCount++
+                Write-Log "  [SKIP-EXPIRED-TYPE] $($pack.Description)" "WARN"
+                continue
+            }
+            $expiry = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
+            if ($null -ne $expiry -and $expiry -lt $NowUtc) {
+                $ExpiredCount++
+                Write-Log ("  [SKIP-EXPIRED-DATE] {0} | Expiry={1:yyyy-MM-dd}" -f `
+                    $pack.Description, $expiry) "WARN"
+                continue
+            }
+
+            $sig = '{0}|{1}|{2}|{3}' -f `
+                $pack.Description, $pack.ProductVersion,
+                $pack.TotalLicenses, $pack.IssuedLicenses
+            if (-not $SeenSignatures.Add($sig)) {
+                $DuplicateCount++
+                Write-Log "  [SKIP-DUPLICATE] $($pack.Description)" "WARN"
+                continue
+            }
+
+            $ActivePacks.Add($pack)
+        }
+
+        # Sum totals from active packs only
+        foreach ($pack in $ActivePacks) {
+            $Installed += [int64]$pack.TotalLicenses
+            $Issued    += [int64]$pack.IssuedLicenses
+            $Available += [int64]$pack.AvailableLicenses
+        }
+
+        # Audit log -- one line per active pack that contributes to totals
+        foreach ($pack in $ActivePacks) {
+            $expStr = if ([string]::IsNullOrWhiteSpace([string]$pack.ExpirationDate)) {
+                          "Never"
+                      } else {
+                          $dt = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
+                          if ($null -ne $dt) { $dt.ToString("yyyy-MM-dd") } else { "Never" }
+                      }
+            Write-Log ("  [ACTIVE] {0} | Total={1} | Issued={2} | Available={3} | Expiry={4}" -f `
+                $pack.Description,
+                [int64]$pack.TotalLicenses,
+                [int64]$pack.IssuedLicenses,
+                [int64]$pack.AvailableLicenses,
+                $expStr) "SUCCESS"
+        }
+
+        Write-Log ("  Filter: Raw={0} | Unlimited={1} | Expired={2} | Duplicate={3} | Active={4}" -f `
+            $KeyPacks.Count, $UnlimitedCount, $ExpiredCount, $DuplicateCount, $ActivePacks.Count) "INFO"
+        Write-Log ("  Totals: Installed={0} | Issued={1} | Available={2}" -f `
+            $Installed, $Issued, $Available) "SUCCESS"
+
+    } catch {
+        $msg = "CAL calculation error for [$Server]: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "ERROR"
+        $Installed = 0; $Issued = 0; $Available = 0
+    }
+
+    # 4. Compliance
+    $UsagePct   = if ($Installed -gt 0) {
+                      [math]::Round(($Issued / $Installed) * 100, 1)
+                  } else { 0 }
+    $Compliance = Get-Compliance -Pct $UsagePct
+
+    Write-Log ("  Result: {0}/{1} ({2}%) => {3}" -f $Issued, $Installed, $UsagePct, $Compliance)
+    if ($ErrorLog.Count -gt 0) {
+        Write-Log "  $($ErrorLog.Count) issue(s) captured for [$Server]" "WARN"
+    }
+    Write-Log "--- [$Server] Complete ---"
+
+    return [PSCustomObject]@{
+        Server     = $Server
+        OSVersion  = $OSVersion
+        Installed  = [int]$Installed
+        Issued     = [int]$Issued
+        Available  = [int]$Available
+        UsagePct   = $UsagePct
+        Compliance = $Compliance
+        Errors     = $ErrorLog
+    }
+}
+
+#endregion DATA COLLECTION
+
+
 #region HTML TEMPLATE
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Get-UnifiedTemplate
-# ─────────────────────────────────────────────────────────────────────────────
 function Get-UnifiedTemplate {
     return @'
 <!DOCTYPE html>
@@ -114,7 +316,6 @@ function Get-UnifiedTemplate {
             --canvas-bot   : #ECE7F2;
             --font         : 'Segoe UI','Helvetica Neue',Arial,sans-serif;
             --font-num     : 'Segoe UI','Helvetica Neue',Arial,sans-serif;
-            --mono         : 'Cascadia Code','Consolas','Courier New',monospace;
             --max-w        : 1380px;
             --r            : 14px;
             --r-sm         : 10px;
@@ -186,34 +387,8 @@ function Get-UnifiedTemplate {
         .alert-err  { border-color: var(--err); color: #5A000A; }
         .alert-err strong { color: var(--err); }
 
-        /* ---- Overview banner (single-server only) ------------------------- */
-        .ov-banner {
-            display: flex; align-items: center; gap: 18px; padding: 18px 24px;
-            border-radius: var(--r); margin-bottom: 18px;
-            background: var(--surface); box-shadow: var(--sh);
-            border: 1px solid var(--line); border-left: 5px solid currentColor;
-            position: relative; overflow: hidden;
-        }
-        .ov-banner::before {
-            content: ''; position: absolute; inset: 0; opacity: .05; pointer-events: none;
-            background: radial-gradient(circle at 100% 0%, currentColor 0%, transparent 60%);
-        }
-        .ov-badge {
-            padding: 8px 22px; border-radius: 30px; font-weight: 800; font-size: .85rem;
-            letter-spacing: .4px; white-space: nowrap; color: #fff;
-            background: currentColor; position: relative; z-index: 1;
-            box-shadow: 0 4px 14px rgba(0,0,0,.14);
-        }
-        .ov-badge span  { color: #fff; }
-        .ov-detail      { position: relative; z-index: 1; }
-        .ov-detail strong { font-size: 1.02rem; color: var(--text-h); }
-        .ov-detail .sub   { font-size: .79rem; color: var(--text-m); margin-top: 3px; }
-
-        /* ---- KPI cards ---------------------------------------------------- */
-        /* Grid col count set by JS: single=6, multi=4                         */
-        .card-grid        { display: grid; gap: 10px; margin-bottom: 18px; align-items: stretch; }
-        .card-grid.single { grid-template-columns: repeat(6, 1fr); }
-        .card-grid.multi  { grid-template-columns: repeat(4, 1fr); }
+        /* ---- KPI cards (one 4-column layout, used for single or multi server) */
+        .card-grid { display: grid; gap: 10px; margin-bottom: 18px; align-items: stretch; grid-template-columns: repeat(4, 1fr); }
         .card {
             background: var(--surface); border-radius: var(--r-sm); padding: 13px 14px 11px;
             box-shadow: var(--sh); border-top: 3px solid var(--brand);
@@ -268,25 +443,12 @@ function Get-UnifiedTemplate {
         .r-warn td { background: var(--warn-bg); }
         .r-err  td { background: var(--err-bg);  }
         .td-name   { font-weight: 700; color: var(--text-h); }
-        .td-mono   { font-family: var(--mono); font-size: .74rem; }
-        .badge {
-            display: inline-block; padding: 3px 11px; border-radius: 30px;
-            font-size: .68rem; font-weight: 700; letter-spacing: .2px; white-space: nowrap;
-        }
-        .b-ok   { background: var(--ok-bg);   color: var(--ok);   border: 1px solid var(--ok-line); }
-        .b-warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-line); }
-        .b-err  { background: var(--err-bg);  color: var(--err);  border: 1px solid var(--err-line); }
 
         /* ---- Progress bar ------------------------------------------------- */
         .pw { display: flex; align-items: center; gap: 9px; }
         .pt { flex: 1; height: 9px; background: #ECE7F2; border-radius: 8px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,.06); }
         .pf { height: 100%; border-radius: 8px; transition: width .7s cubic-bezier(.22,.9,.34,1); }
         .pp { font-weight: 700; font-size: .76rem; min-width: 38px; text-align: right; }
-
-        code {
-            font-family: var(--mono); font-size: .74rem; background: var(--brand-ultra);
-            padding: 2px 6px; border-radius: 5px; color: var(--brand-dark); word-break: break-all;
-        }
     </style>
     <script>
         function tog(id) {
@@ -319,19 +481,10 @@ function Get-UnifiedTemplate {
 
 <div class="rpt-body">
 
-    <!-- Error alerts (single-server mode) -->
+    <!-- Error alerts (populated for any failed/degraded server queries) -->
     <div id="err-section"></div>
 
-    <!-- Overview banner -- shown for single server, hidden for multi -->
-    <div class="ov-banner" id="ov-banner" style="display:none;">
-        <span class="ov-badge" id="ov-badge">-</span>
-        <div class="ov-detail">
-            <strong id="ov-detail-main">-</strong>
-            <div class="sub" id="ov-detail-sub">-</div>
-        </div>
-    </div>
-
-    <!-- KPI cards -- count and content set by renderReport() -->
+    <!-- KPI cards -- same 4-column layout for 1 server or many -->
     <div class="card-grid" id="card-grid"></div>
 
     <!-- License summary table -->
@@ -360,8 +513,7 @@ function Get-UnifiedTemplate {
 </div>
 
 <!-- =====================================================================
-     UNIFIED RENDER ENGINE
-     Detects which variable was injected and calls the correct renderer.
+     RENDER ENGINE -- one function renders the report for 1 or N servers
      ===================================================================== -->
 <script>
 (function () {
@@ -396,54 +548,38 @@ function Get-UnifiedTemplate {
                "</tr>";
     }
 
-    /* ── SINGLE-SERVER renderer ─────────────────────────────────────── */
-    function renderSingle(d) {
-        var color = colorMap[d.Compliance] || '#0A7A09';
+    /* Single render function -- used for one server or many, same layout */
+    function renderReport(d) {
+        var overallColor = colorMap[d.OverallState] || '#0A7A09';
+        var isSingle      = d.ServerCount === 1;
 
-        /* Header */
-        set('hdr-eyebrow', 'Citrix Workspace Automation Suite \u00b7 Single Server');
+        /* Header strip -- one format, server count just changes the numbers */
+        set('hdr-eyebrow', 'Citrix Workspace Automation Suite \u00b7 ' + d.ServerCount + ' Server(s)');
         set('gen-date', d.GenDate);
         setHtml('hdr-strip-left',
-            "<span>&#128220; Server: <strong>" + d.LicenseServerFQDN + "</strong></span>" +
-            "<span>&#128202; CALs: <strong>" + d.Issued + " / " + d.Installed + " (" + d.UsagePct + "%)</strong></span>"
+            "<span>&#128421; Servers: <strong>" + d.ServerCount + "</strong></span>" +
+            "<span>&#128202; Total CALs: <strong>" + d.TotalInstalled + "</strong></span>" +
+            "<span>&#128273; In Use: <strong>" + d.TotalIssued + " (" + d.OverallPct + "%)</strong></span>"
         );
         var pill = document.getElementById('status-pill');
-        pill.textContent = d.Compliance + ' \u2013 ' + d.UsagePct + '% CAL Utilisation';
-        pill.className   = 'status-pill ' + (pillMap[d.Compliance] || 'pill-ok');
+        pill.textContent = d.OverallState + ' \u2013 ' + d.OverallPct + '% Utilisation';
+        pill.className   = 'status-pill ' + (pillMap[d.OverallState] || 'pill-ok');
 
-        /* Overview banner */
-        var banner = document.getElementById('ov-banner');
-        banner.style.display     = '';
-        banner.style.color       = color;
-        banner.style.borderColor = color;
-        var badge = document.getElementById('ov-badge');
-        badge.textContent      = d.Compliance;
-        badge.style.background = color;
-        set('ov-detail-main', d.Issued + ' of ' + d.Installed + ' CALs in use (' + d.UsagePct + '%) \u2013 ' + d.Available + ' remaining');
-        setHtml('ov-detail-sub',
-            'Warn: <strong>' + d.WarnPctLabel + '</strong> &nbsp;|&nbsp; Critical: <strong>' + d.CritPctLabel + '</strong>'
-        );
-
-        /* KPI cards -- 6-column */
+        /* KPI cards -- same 4-column set for 1 server or many */
         var grid = document.getElementById('card-grid');
-        grid.classList.add('single');
         grid.innerHTML =
-            "<div class='card' data-ico='&#128220;'><div class='c-lbl'>License Server</div>" +
-                "<div class='c-val'>" + d.LicenseServerFQDN + "</div><div class='c-sub'>" + d.LicServerOSVersion + "</div></div>" +
+            "<div class='card' data-ico='&#128421;'><div class='c-lbl'>" + (isSingle ? 'License Server' : 'License Servers') + "</div>" +
+                "<div class='c-val'>" + (isSingle ? d.Rows[0].Server : d.ServerCount) + "</div>" +
+                "<div class='c-sub'>" + (isSingle ? d.Rows[0].OSVersion : 'Queried this run') + "</div></div>" +
             "<div class='card' data-ico='&#128202;'><div class='c-lbl'>Total CALs</div>" +
-                "<div class='c-val'>" + d.Installed + "</div></div>" +
+                "<div class='c-val'>" + d.TotalInstalled + "</div></div>" +
             "<div class='card' data-ico='&#128273;'><div class='c-lbl'>CALs In Use</div>" +
-                "<div class='c-val' style='color:" + color + ";'>" + d.Issued + "</div>" +
-                "<div class='c-sub'>" + d.UsagePct + "% utilisation</div></div>" +
+                "<div class='c-val' style='color:" + overallColor + ";'>" + d.TotalIssued + "</div>" +
+                "<div class='c-sub'>" + d.OverallPct + "% utilisation</div></div>" +
             "<div class='card' data-ico='&#9989;'><div class='c-lbl'>CALs Available</div>" +
-                "<div class='c-val'>" + d.Available + "</div>" +
-                "<div class='c-sub'>" + d.HeadroomPct + "% headroom</div></div>" +
-            "<div class='card' data-ico='&#9888;'><div class='c-lbl'>Warn Threshold</div>" +
-                "<div class='c-val'>" + d.WarnPctLabel + "</div><div class='c-sub'>" + d.WarnCardSub + "</div></div>" +
-            "<div class='card' data-ico='&#128308;'><div class='c-lbl'>Crit Threshold</div>" +
-                "<div class='c-val'>" + d.CritPctLabel + "</div><div class='c-sub'>" + d.CritCardSub + "</div></div>";
+                "<div class='c-val'>" + d.TotalAvailable + "</div></div>";
 
-        /* Errors */
+        /* Errors -- aggregated across all queried servers */
         if (d.Errors && d.Errors.length > 0) {
             var li = d.Errors.map(function(e){ return '<li>' + e + '</li>'; }).join('');
             setHtml('err-section',
@@ -452,50 +588,8 @@ function Get-UnifiedTemplate {
             );
         }
 
-        /* Section header & table row */
-        set('sec-hdr-label', '\uD83D\uDCDC License Summary \u2013 ' + d.LicenseServerFQDN);
-        setHtml('kp-tbody', makeRow(
-            d.LicenseServerFQDN, d.LicServerOSVersion,
-            d.Installed, d.Issued, d.Available,
-            d.UsagePct, d.WarnThresholdPct, d.CritThresholdPct
-        ));
-    }
-
-    /* ── MULTI-SERVER renderer ──────────────────────────────────────── */
-    function renderMulti(d) {
-        var overallColor = colorMap[d.OverallState] || '#0A7A09';
-
-        /* Header */
-        set('hdr-eyebrow', 'Citrix Workspace Automation Suite \u00b7 Combined Summary \u2013 ' + d.ServerCount + ' Server(s)');
-        set('gen-date', d.GenDate);
-        setHtml('hdr-strip-left',
-            "<span>&#128421; Servers: <strong>" + d.ServerCount + "</strong></span>" +
-            "<span>&#128202; Total CALs: <strong>" + d.TotalInstalled + "</strong></span>" +
-            "<span>&#128273; In Use: <strong>" + d.TotalIssued + " (" + d.OverallPct + "%)</strong></span>"
-        );
-        var pill = document.getElementById('status-pill');
-        pill.textContent = d.OverallState + ' \u2013 ' + d.OverallPct + '% Overall Utilisation';
-        pill.className   = 'status-pill ' + (pillMap[d.OverallState] || 'pill-ok');
-
-        /* Overview banner -- hidden for multi */
-        document.getElementById('ov-banner').style.display = 'none';
-
-        /* KPI cards -- 4-column aggregate */
-        var grid = document.getElementById('card-grid');
-        grid.classList.add('multi');
-        grid.innerHTML =
-            "<div class='card' data-ico='&#128421;'><div class='c-lbl'>License Servers</div>" +
-                "<div class='c-val'>" + d.ServerCount + "</div><div class='c-sub'>Queried this run</div></div>" +
-            "<div class='card' data-ico='&#128202;'><div class='c-lbl'>Total CALs (All Servers)</div>" +
-                "<div class='c-val'>" + d.TotalInstalled + "</div></div>" +
-            "<div class='card' data-ico='&#128273;'><div class='c-lbl'>CALs In Use</div>" +
-                "<div class='c-val' style='color:" + overallColor + ";'>" + d.TotalIssued + "</div>" +
-                "<div class='c-sub'>" + d.OverallPct + "% overall</div></div>" +
-            "<div class='card' data-ico='&#9989;'><div class='c-lbl'>CALs Available</div>" +
-                "<div class='c-val'>" + d.TotalAvailable + "</div></div>";
-
         /* Section header & table -- one row per server, sorted by usage desc */
-        set('sec-hdr-label', '\uD83D\uDCDC License Servers \u2013 ' + d.ServerCount + ' server(s)');
+        set('sec-hdr-label', '\uD83D\uDCDC License Summary \u2013 ' + d.ServerCount + ' server(s)');
         var sorted = d.Rows.slice().sort(function(a,b){ return b.UsagePct - a.UsagePct; });
         var body = '';
         sorted.forEach(function(r) {
@@ -507,16 +601,15 @@ function Get-UnifiedTemplate {
         );
     }
 
-    /* ── Entry point: detect variable, dispatch renderer ────────────── */
-    function renderReport() {
-        if (window.REPORT_DATA)   { renderSingle(window.REPORT_DATA);  return; }
-        if (window.COMBINED_DATA) { renderMulti(window.COMBINED_DATA); return; }
+    /* Entry point */
+    function init() {
+        if (window.REPORT_DATA) { renderReport(window.REPORT_DATA); }
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', renderReport);
+        document.addEventListener('DOMContentLoaded', init);
     } else {
-        renderReport();
+        init();
     }
 
 }());
@@ -531,9 +624,6 @@ function Get-UnifiedTemplate {
 
 #region REPORT WRITERS
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Save-Report  - for single and multi-server HTML output.
-# ─────────────────────────────────────────────────────────────────────────────
 function Save-Report {
     param(
         [Parameter(Mandatory)]
@@ -548,78 +638,46 @@ function Save-Report {
     $cDT = Get-Date -Format "yyyyMMdd_HHmmss"
 
     try {
-        $Html = Get-UnifiedTemplate
+        $Html    = Get-UnifiedTemplate
+        $GenDate = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
 
-        # ── Single server ──────────────────────────────────────────────────
         if ($Results.Count -eq 1) {
-            $r           = $Results[0]
-            $SafeName    = $r.Server -replace '[^a-zA-Z0-9\-\.]', '_'
-            $OutputFile  = Join-Path $OutputDir "RDSLicenseMonitoring_${SafeName}_${cDT}.html"
-            $GenDate     = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
-            $HeadroomPct = if ($r.Installed -gt 0) {
-                               [math]::Round(($r.Available / $r.Installed) * 100, 1)
-                           } else { 0 }
-            $WarnCardSub = if ($r.UsagePct -ge $WarningThresholdPct)  { "BREACHED"    } else { "Not reached" }
-            $CritCardSub = if ($r.UsagePct -ge $CriticalThresholdPct) { "BREACHED"    } else { "Not reached" }
-            $errJson     = '[' + (
-                               @($r.Errors | ForEach-Object { '"' + (EscapeJson $_) + '"' }) -join ','
-                           ) + ']'
-
-            $JsonBlock = @"
-<script>
-window.REPORT_DATA = {
-  "GenDate"           : "$(EscapeJson $GenDate)",
-  "LicenseServerFQDN" : "$(EscapeJson $r.Server)",
-  "LicServerOSVersion": "$(EscapeJson $r.OSVersion)",
-  "Compliance"        : "$(EscapeJson $r.Compliance)",
-  "UsagePct"          : $($r.UsagePct),
-  "Issued"            : $($r.Issued),
-  "Installed"         : $($r.Installed),
-  "Available"         : $($r.Available),
-  "HeadroomPct"       : $HeadroomPct,
-  "WarnPctLabel"      : "$WarningThresholdPct%",
-  "CritPctLabel"      : "$CriticalThresholdPct%",
-  "WarnThresholdPct"  : $WarningThresholdPct,
-  "CritThresholdPct"  : $CriticalThresholdPct,
-  "WarnCardSub"       : "$(EscapeJson $WarnCardSub)",
-  "CritCardSub"       : "$(EscapeJson $CritCardSub)",
-  "Errors"            : $errJson
-};
-</script>
-"@
-            $Html.Replace('</body>', $JsonBlock + "`n</body>") |
-                Out-File -FilePath $OutputFile -Encoding UTF8 -ErrorAction Stop
-            Write-Log "Single-server report saved: $OutputFile" "SUCCESS"
+            $SafeName   = $Results[0].Server -replace '[^a-zA-Z0-9\-\.]', '_'
+            $OutputFile = Join-Path $OutputDir "RDSLicenseMonitoring_${SafeName}_${cDT}.html"
+        } else {
+            $OutputFile = Join-Path $OutputDir "RDSLicenseMonitoring_Combined_${cDT}.html"
         }
 
-        # ── Multiple servers ───────────────────────────────────────────────
-        else {
-            $TotalInstalled = [int]($Results | Measure-Object Installed -Sum).Sum
-            $TotalIssued    = [int]($Results | Measure-Object Issued    -Sum).Sum
-            $TotalAvailable = [int]($Results | Measure-Object Available -Sum).Sum
-            $OverallPct     = if ($TotalInstalled -gt 0) {
-                                  [math]::Round(($TotalIssued / $TotalInstalled) * 100, 1)
-                              } else { 0 }
-            $OverallState   = Get-Compliance -Pct $OverallPct
+        $TotalInstalled = [int]($Results | Measure-Object Installed -Sum).Sum
+        $TotalIssued    = [int]($Results | Measure-Object Issued    -Sum).Sum
+        $TotalAvailable = [int]($Results | Measure-Object Available -Sum).Sum
+        $OverallPct     = if ($TotalInstalled -gt 0) {
+                              [math]::Round(($TotalIssued / $TotalInstalled) * 100, 1)
+                          } else { 0 }
+        $OverallState   = Get-Compliance -Pct $OverallPct
 
-            $rowsJson = '[' + (
-                @($Results | ForEach-Object {
-                    '{"Server":"'    + (EscapeJson $_.Server)   + '",' +
-                    '"OSVersion":"'  + (EscapeJson $_.OSVersion) + '",' +
-                    '"Installed":'   + [int]$_.Installed          + ',' +
-                    '"Issued":'      + [int]$_.Issued             + ',' +
-                    '"Available":'   + [int]$_.Available          + ',' +
-                    '"UsagePct":'    + $_.UsagePct                + ',' +
-                    '"Compliance":"' + (EscapeJson $_.Compliance) + '"}'
-                }) -join ','
-            ) + ']'
+        # One row per server (works for a single server too)
+        $rowsJson = '[' + (
+            @($Results | ForEach-Object {
+                '{"Server":"'    + (EscapeJson $_.Server)    + '",' +
+                '"OSVersion":"'  + (EscapeJson $_.OSVersion) + '",' +
+                '"Installed":'   + [int]$_.Installed         + ',' +
+                '"Issued":'      + [int]$_.Issued            + ',' +
+                '"Available":'   + [int]$_.Available         + ',' +
+                '"UsagePct":'    + $_.UsagePct                + ',' +
+                '"Compliance":"' + (EscapeJson $_.Compliance) + '"}'
+            }) -join ','
+        ) + ']'
 
-            $OutputFile = Join-Path $OutputDir "RDSLicenseMonitoring_Combined_${cDT}.html"
-            $GenDate    = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+        # All errors from all queried servers, combined into one list
+        $errJson = '[' + (
+            @($Results | ForEach-Object { $_.Errors } |
+                ForEach-Object { '"' + (EscapeJson $_) + '"' }) -join ','
+        ) + ']'
 
-            $JsonBlock = @"
+        $JsonBlock = @"
 <script>
-window.COMBINED_DATA = {
+window.REPORT_DATA = {
   "GenDate"          : "$(EscapeJson $GenDate)",
   "ServerCount"      : $($Results.Count),
   "TotalInstalled"   : $TotalInstalled,
@@ -629,14 +687,14 @@ window.COMBINED_DATA = {
   "OverallState"     : "$(EscapeJson $OverallState)",
   "WarnThresholdPct" : $WarningThresholdPct,
   "CritThresholdPct" : $CriticalThresholdPct,
-  "Rows"             : $rowsJson
+  "Rows"             : $rowsJson,
+  "Errors"           : $errJson
 };
 </script>
 "@
-            $Html.Replace('</body>', $JsonBlock + "`n</body>") |
-                Out-File -FilePath $OutputFile -Encoding UTF8 -ErrorAction Stop
-            Write-Log "Combined report saved ($($Results.Count) server(s)): $OutputFile" "SUCCESS"
-        }
+        $Html.Replace('</body>', $JsonBlock + "`n</body>") |
+            Out-File -FilePath $OutputFile -Encoding UTF8 -ErrorAction Stop
+        Write-Log "Report saved ($($Results.Count) server(s)): $OutputFile" "SUCCESS"
 
     } catch {
         Write-Log "FATAL: Report could not be saved -- $($_.Exception.Message)" "ERROR"
@@ -647,216 +705,6 @@ window.COMBINED_DATA = {
 #endregion REPORT WRITERS
 
 
-#region DATA COLLECTION
-
-function Get-KeyPacks {
-    param(
-        [Parameter(Mandatory)][string]$Server,
-        [System.Collections.Generic.List[string]]$ErrorLog
-    )
-
-    # Attempt 1: WMI (fastest path) ──────────────────────────────────────────
-    try {
-        $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
-                       -ComputerName $Server -ErrorAction Stop)
-        Write-Log "  WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
-        return $packs
-    } catch {
-        Write-Log "  WMI failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
-    }
-
-    # Attempt 2: CIM over DCOM (fallback) ────────────────────────────────────
-    $cimSess = $null
-    try {
-        $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $Server `
-                       -SessionOption $cimOpts -ErrorAction Stop
-        $packs   = @(Get-CimInstance -CimSession $cimSess `
-                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
-        Write-Log "  CIM OK -- $($packs.Count) key pack(s)" "SUCCESS"
-        return $packs
-    } catch {
-        $msg = "[$Server] unreachable via WMI and CIM: $($_.Exception.Message)"
-        $ErrorLog.Add($msg)
-        Write-Log "  $msg" "ERROR"
-        return @()
-    } finally {
-        if ($null -ne $cimSess) {
-            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-}
-
-function Get-OSVersion {
-    param(
-        [Parameter(Mandatory)][string]$Server,
-        [System.Collections.Generic.List[string]]$ErrorLog
-    )
-
-    # Attempt 1: WMI ─────────────────────────────────────────────────────────
-    try {
-        $os = Get-WmiObject -Class "Win32_OperatingSystem" `
-                  -ComputerName $Server -ErrorAction Stop
-        return "$($os.Caption)".Trim()
-    } catch {
-        Write-Log "  WMI OS query failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
-    }
-
-    # Attempt 2: CIM over DCOM ───────────────────────────────────────────────
-    $cimSess = $null
-    try {
-        $cimOpts = New-CimSessionOption -Protocol Dcom
-        $cimSess = New-CimSession -ComputerName $Server `
-                       -SessionOption $cimOpts -ErrorAction Stop
-        $os      = Get-CimInstance -CimSession $cimSess `
-                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
-        return "$($os.Caption)".Trim()
-    } catch {
-        $msg = "Could not retrieve OS version for [$Server]: $($_.Exception.Message)"
-        $ErrorLog.Add($msg)
-        Write-Log "  $msg" "WARN"
-        return "N/A"
-    } finally {
-        if ($null -ne $cimSess) {
-            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
-        }
-    }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# LicenseServerReport  --  full data collection for one license server.
-# ─────────────────────────────────────────────────────────────────────────────
-function Invoke-LicenseServerReport {
-    param([Parameter(Mandatory)][string]$Server)
-
-    Write-Log "--- [$Server] Starting ---"
-    $ErrorLog = [System.Collections.Generic.List[string]]::new()
-
-    # 1. Query key packs ──────────────────────────────────────────────────────
-    $KeyPacks = Get-KeyPacks -Server $Server -ErrorLog $ErrorLog
-
-    if ($KeyPacks.Count -eq 0) {
-        $ErrorLog.Add("[$Server] Zero key packs returned. Verify the RD Licensing role is installed, packs are activated, and the service account has WMI/CIM access.")
-        Write-Log "  Zero key packs returned from [$Server]" "WARN"
-    }
-
-    # 2. Query OS version (runs regardless of key pack success) ───────────────
-    $OSVersion = Get-OSVersion -Server $Server -ErrorLog $ErrorLog
-
-    # 3. Filter key packs and calculate CAL totals ────────────────────────────
-    [int64]$Installed      = 0
-    [int64]$Issued         = 0
-    [int64]$Available      = 0
-    $UnlimitedCount        = 0
-    $ExpiredCount          = 0
-    $DuplicateCount        = 0
-    $ActivePacks           = [System.Collections.Generic.List[object]]::new()
-
-    try {
-        $NowUtc         = [datetime]::UtcNow
-        $SeenSignatures = [System.Collections.Generic.HashSet[string]]::new(
-                              [System.StringComparer]::OrdinalIgnoreCase)
-
-        foreach ($pack in $KeyPacks) {
-
-            # Step 1 -- exclude unlimited / built-in packs
-            $tl = [int64]$pack.TotalLicenses
-            if ($tl -eq -1 -or $tl -eq 4294967295) {
-                $UnlimitedCount++
-                continue
-            }
-
-            # Step 2 -- exclude explicitly expired (KeyPackType = 6)
-            if ([int]$pack.KeyPackType -eq 6) {
-                $ExpiredCount++
-                Write-Log "  [SKIP-EXPIRED-TYPE] $($pack.Description)" "WARN"
-                continue
-            }
-
-            # Step 3 -- exclude expired by ExpirationDate
-            $expiry = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
-            if ($null -ne $expiry -and $expiry -lt $NowUtc) {
-                $ExpiredCount++
-                Write-Log ("  [SKIP-EXPIRED-DATE] {0} | Expiry={1:yyyy-MM-dd}" -f `
-                    $pack.Description, $expiry) "WARN"
-                continue
-            }
-
-            # Step 4 -- deduplicate on Description|Version|Total|Issued
-            $sig = '{0}|{1}|{2}|{3}' -f `
-                $pack.Description, $pack.ProductVersion,
-                $pack.TotalLicenses, $pack.IssuedLicenses
-            if (-not $SeenSignatures.Add($sig)) {
-                $DuplicateCount++
-                Write-Log "  [SKIP-DUPLICATE] $($pack.Description)" "WARN"
-                continue
-            }
-
-            $ActivePacks.Add($pack)
-        }
-
-        # Sum totals from active packs only
-        foreach ($pack in $ActivePacks) {
-            $Installed += [int64]$pack.TotalLicenses
-            $Issued    += [int64]$pack.IssuedLicenses
-            $Available += [int64]$pack.AvailableLicenses
-        }
-
-        # Audit log -- one line per active pack that contributes to totals
-        foreach ($pack in $ActivePacks) {
-            $expStr = if ([string]::IsNullOrWhiteSpace([string]$pack.ExpirationDate)) {
-                          "Never"
-                      } else {
-                          $dt = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
-                          if ($null -ne $dt) { $dt.ToString("yyyy-MM-dd") } else { "Never" }
-                      }
-            Write-Log ("  [ACTIVE] {0} | Total={1} | Issued={2} | Available={3} | Expiry={4}" -f `
-                $pack.Description,
-                [int64]$pack.TotalLicenses,
-                [int64]$pack.IssuedLicenses,
-                [int64]$pack.AvailableLicenses,
-                $expStr) "SUCCESS"
-        }
-
-        Write-Log ("  Filter: Raw={0} | Unlimited={1} | Expired={2} | Duplicate={3} | Active={4}" -f `
-            $KeyPacks.Count, $UnlimitedCount, $ExpiredCount, $DuplicateCount, $ActivePacks.Count) "INFO"
-        Write-Log ("  Totals: Installed={0} | Issued={1} | Available={2}" -f `
-            $Installed, $Issued, $Available) "SUCCESS"
-
-    } catch {
-        $msg = "CAL calculation error for [$Server]: $($_.Exception.Message)"
-        $ErrorLog.Add($msg)
-        Write-Log "  $msg" "ERROR"
-        $Installed = 0; $Issued = 0; $Available = 0
-    }
-
-    # 4. Compliance ───────────────────────────────────────────────────────────
-    $UsagePct   = if ($Installed -gt 0) {
-                      [math]::Round(($Issued / $Installed) * 100, 1)
-                  } else { 0 }
-    $Compliance = Get-Compliance -Pct $UsagePct
-
-    Write-Log ("  Result: {0}/{1} ({2}%) => {3}" -f $Issued, $Installed, $UsagePct, $Compliance)
-    if ($ErrorLog.Count -gt 0) {
-        Write-Log "  $($ErrorLog.Count) issue(s) captured for [$Server]" "WARN"
-    }
-    Write-Log "--- [$Server] Complete ---"
-
-    return [PSCustomObject]@{
-        Server     = $Server
-        OSVersion  = $OSVersion
-        Installed  = [int]$Installed
-        Issued     = [int]$Issued
-        Available  = [int]$Available
-        UsagePct   = $UsagePct
-        Compliance = $Compliance
-        Errors     = $ErrorLog
-    }
-}
-
-#endregion DATA COLLECTION
-
-
 #region MAIN
 try {
 
@@ -865,7 +713,7 @@ try {
     Write-Log "  $ScriptVersion  |  Warn=$WarningThresholdPct%  Crit=$CriticalThresholdPct%"
     Write-Log "================================================================="
 
-    # ── Parse server list ────────────────────────────────────────────────────
+    # Parse server list
     $ServerList = @(
         $LicenseServerFQDN -split ';' |
             ForEach-Object { $_.Trim() } |
@@ -877,7 +725,7 @@ try {
     }
     Write-Log "$($ServerList.Count) server(s): $($ServerList -join ', ')"
 
-    # ── Ensure output folder exists ──────────────────────────────────────────
+    # Ensure output folder exists
     if (-not (Test-Path $OutputDir)) {
         try {
             New-Item -Path $OutputDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
@@ -889,7 +737,7 @@ try {
         Write-Log "Output folder: $OutputDir" "INFO"
     }
 
-    # ── Query servers ────────────────────────────────────────────────────────
+    # Query servers
     $ServerResults = [System.Collections.Generic.List[object]]::new()
     $FailedServers = [System.Collections.Generic.List[string]]::new()
 
@@ -912,15 +760,7 @@ try {
             $Pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(
                         1, $ServerList.Count)
             $Pool.ApartmentState = "MTA"
-            $Pool.Open()
 
-            # Serialise each function body as a plain string so it can be
-            # safely injected into the runspace script without expansion issues.
-            # FIX 2+3: use AddScript([string]) + AddArgument(); use
-            #           Set-Item function:\ inside the runspace to define
-            #           functions without Invoke-Expression string-expansion bugs.
-            # $function:Name syntax does not support hyphens in PowerShell.
-            # Use (Get-Command Name).ScriptBlock.ToString() instead -- always works.
             $fnBodies = @{
                 WriteLog    = (Get-Command Write-Log).ScriptBlock.ToString()
                 GetComp     = (Get-Command Get-Compliance).ScriptBlock.ToString()
@@ -932,8 +772,6 @@ try {
 
             $Jobs = [System.Collections.Generic.List[object]]::new()
 
-            # Runspace script as a plain string (no scriptblock literal) so
-            # AddArgument values are not subject to outer-scope expansion.
             $runspaceScript = @'
 param(
     [string]$Server,
@@ -1011,7 +849,7 @@ Invoke-LicenseServerReport -Server $Server
         Write-Log "Parallel queries complete." "SUCCESS"
     }
 
-    # ── Summary ──────────────────────────────────────────────────────────────
+    # Summary
     Write-Log "================================================================="
     Write-Log ("Batch complete: {0} succeeded, {1} failed of {2} total" -f `
         $ServerResults.Count, $FailedServers.Count, $ServerList.Count) "SUCCESS"
@@ -1019,14 +857,14 @@ Invoke-LicenseServerReport -Server $Server
         Write-Log "Failed: $($FailedServers -join ', ')" "ERROR"
     }
 
-    # ── Save report ──────────────────────────────────────────────────────────
+    # Save report
     if ($ServerResults.Count -gt 0) {
         Save-Report -Results $ServerResults
     } else {
         Write-Log "No successful results -- no report generated." "WARN"
     }
 
-    # ── Exit ─────────────────────────────────────────────────────────────────
+    # Exit
     if ($FailedServers.Count -gt 0) { exit 3 } else { exit 0 }
 
 } catch {
