@@ -1,14 +1,15 @@
 ############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
-
 ############################################################################################################
 
+#region PARAMETERS
 param(
     # One server FQDN, or several separated by semicolons (e.g. "srv1;srv2;srv3").
     [Parameter(Mandatory = $true)]
     [string]$LicenseServerFQDN
 )
+#endregion PARAMETERS
 
 
 #region CONFIG
@@ -38,10 +39,12 @@ function Write-Log {
         }
         Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][$Lvl] $Msg" -ForegroundColor $col
     } catch {
+        # Logging must never break the run -- fall back to a plain, uncoloured line.
         Write-Host "[$Lvl] $Msg"
     }
 }
 
+# Escapes a string for safe embedding inside the JSON block written into the HTML report.
 function EscapeJson {
     param([string]$s)
     if ([string]::IsNullOrEmpty($s)) { return "" }
@@ -59,6 +62,7 @@ function EscapeJson {
     }
 }
 
+# Maps a usage percentage to a compliance state using the configured thresholds.
 function Get-Compliance {
     param([double]$Pct)
     if ($Pct -ge $CriticalThresholdPct) { return "CRITICAL"  }
@@ -66,10 +70,12 @@ function Get-Compliance {
     return "COMPLIANT"
 }
 
+# Converts a raw WMI datetime string (e.g. license expiry) to UTC, or $null if it never expires.
 function ConvertFrom-WmiExpiry {
     param([string]$Raw)
     if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
     try {
+        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU -- only the first 14 chars are needed.
         $datePart = $Raw.Substring(0, 14)
         $dt = [datetime]::ParseExact(
                   $datePart,
@@ -80,6 +86,7 @@ function ConvertFrom-WmiExpiry {
         if ($dt.Year -le 1970) { return $null }
         return $dt.ToUniversalTime()
     } catch {
+        # Unparseable date -- treat as non-expiring to avoid false exclusions.
         return $null
     }
 }
@@ -105,6 +112,7 @@ function Get-KeyPacks {
         Write-Log "  WMI failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
     }
 
+    # Attempt 2: CIM over DCOM (fallback)
     $cimSess = $null
     try {
         $cimOpts = New-CimSessionOption -Protocol Dcom
@@ -193,16 +201,21 @@ function Invoke-LicenseServerReport {
 
         foreach ($pack in $KeyPacks) {
 
+            # Step 1 -- exclude unlimited / built-in packs
             $tl = [int64]$pack.TotalLicenses
             if ($tl -eq -1 -or $tl -eq 4294967295) {
                 $UnlimitedCount++
                 continue
             }
+
+            # Step 2 -- exclude explicitly expired (KeyPackType = 6)
             if ([int]$pack.KeyPackType -eq 6) {
                 $ExpiredCount++
                 Write-Log "  [SKIP-EXPIRED-TYPE] $($pack.Description)" "WARN"
                 continue
             }
+
+            # Step 3 -- exclude expired by ExpirationDate
             $expiry = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
             if ($null -ne $expiry -and $expiry -lt $NowUtc) {
                 $ExpiredCount++
@@ -211,6 +224,7 @@ function Invoke-LicenseServerReport {
                 continue
             }
 
+            # Step 4 -- deduplicate on Description|Version|Total|Issued
             $sig = '{0}|{1}|{2}|{3}' -f `
                 $pack.Description, $pack.ProductVersion,
                 $pack.TotalLicenses, $pack.IssuedLicenses
@@ -346,27 +360,27 @@ function Get-UnifiedTemplate {
             background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(255,255,255,.05) 45%, rgba(255,255,255,.05) 55%, rgba(255,255,255,.55));
         }
         .hdr-inner {
-            position: relative; z-index: 1; padding: 22px 40px 16px;
+            position: relative; z-index: 1; padding: 10px 28px 7px;
             display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
         }
         .hdr-eyebrow {
-            font-size: .68rem; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase;
-            color: rgba(255,255,255,.62); margin-bottom: 5px;
+            font-size: .58rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+            color: rgba(255,255,255,.62); margin-bottom: 2px;
         }
-        .hdr-title { font-size: 1.82rem; font-weight: 800; letter-spacing: -.4px; line-height: 1.15; }
-        .hdr-gen   { font-size: .75rem; color: rgba(255,255,255,.78); white-space: nowrap; }
+        .hdr-title { font-size: 1.12rem; font-weight: 800; letter-spacing: -.3px; line-height: 1.15; }
+        .hdr-gen   { font-size: .62rem; color: rgba(255,255,255,.78); white-space: nowrap; }
         .hdr-strip {
             position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between;
-            background: rgba(15,0,10,.20); padding: 10px 42px; font-size: .76rem;
+            background: rgba(15,0,10,.20); padding: 5px 28px; font-size: .66rem;
             color: rgba(255,255,255,.90); gap: 12px; flex-wrap: wrap;
             border-top: 1px solid rgba(255,255,255,.08);
         }
-        .hdr-strip-left { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-        .hdr-strip-left span { display: flex; align-items: center; gap: 6px; }
+        .hdr-strip-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .hdr-strip-left span { display: flex; align-items: center; gap: 5px; }
         .hdr-strip-left strong { color: #fff; font-weight: 700; }
         .status-pill {
-            padding: 5px 18px; border-radius: 30px; font-weight: 800; font-size: .72rem;
-            letter-spacing: .4px; white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,.16);
+            padding: 3px 13px; border-radius: 30px; font-weight: 800; font-size: .62rem;
+            letter-spacing: .3px; white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,.16);
         }
         .pill-ok   { background: linear-gradient(135deg, #1C9A1A, #0A7A09); color: #fff; }
         .pill-warn { background: linear-gradient(135deg, #D67A00, #B05E00); color: #fff; }
@@ -374,18 +388,6 @@ function Get-UnifiedTemplate {
 
         /* ---- Body --------------------------------------------------------- */
         .rpt-body { max-width: var(--max-w); margin: 28px auto; padding: 0 26px 56px; }
-
-        /* ---- Alerts ------------------------------------------------------- */
-        .alert {
-            display: flex; align-items: flex-start; gap: 14px; border-radius: var(--r-sm);
-            padding: 14px 18px; margin-bottom: 18px; border-left: 4px solid;
-            font-size: .85rem; background: var(--surface); box-shadow: var(--sh);
-        }
-        .alert .ico { font-size: 1.15rem; flex-shrink: 0; margin-top: 1px; }
-        .alert ul   { margin-top: 6px; padding-left: 16px; }
-        .alert li   { margin-top: 3px; }
-        .alert-err  { border-color: var(--err); color: #5A000A; }
-        .alert-err strong { color: var(--err); }
 
         /* ---- KPI cards (one 4-column layout, used for single or multi server) */
         .card-grid { display: grid; gap: 10px; margin-bottom: 18px; align-items: stretch; grid-template-columns: repeat(4, 1fr); }
@@ -462,9 +464,6 @@ function Get-UnifiedTemplate {
 </head>
 <body>
 
-<!-- =====================================================================
-     HEADER  --  content injected by renderReport() at runtime
-     ===================================================================== -->
 <div class="rpt-hdr">
     <div class="hdr-inner">
         <div>
@@ -480,9 +479,6 @@ function Get-UnifiedTemplate {
 </div>
 
 <div class="rpt-body">
-
-    <!-- Error alerts (populated for any failed/degraded server queries) -->
-    <div id="err-section"></div>
 
     <!-- KPI cards -- same 4-column layout for 1 server or many -->
     <div class="card-grid" id="card-grid"></div>
@@ -512,9 +508,6 @@ function Get-UnifiedTemplate {
 
 </div>
 
-<!-- =====================================================================
-     RENDER ENGINE -- one function renders the report for 1 or N servers
-     ===================================================================== -->
 <script>
 (function () {
 
@@ -579,15 +572,6 @@ function Get-UnifiedTemplate {
             "<div class='card' data-ico='&#9989;'><div class='c-lbl'>CALs Available</div>" +
                 "<div class='c-val'>" + d.TotalAvailable + "</div></div>";
 
-        /* Errors -- aggregated across all queried servers */
-        if (d.Errors && d.Errors.length > 0) {
-            var li = d.Errors.map(function(e){ return '<li>' + e + '</li>'; }).join('');
-            setHtml('err-section',
-                "<div class='alert alert-err'><div class='ico'>&#9888;</div>" +
-                "<div><strong>" + d.Errors.length + " error(s) during execution</strong><ul>" + li + "</ul></div></div>"
-            );
-        }
-
         /* Section header & table -- one row per server, sorted by usage desc */
         set('sec-hdr-label', '\uD83D\uDCDC License Summary \u2013 ' + d.ServerCount + ' server(s)');
         var sorted = d.Rows.slice().sort(function(a,b){ return b.UsagePct - a.UsagePct; });
@@ -599,6 +583,12 @@ function Get-UnifiedTemplate {
         setHtml('kp-tbody', body ||
             "<tr><td colspan='6' style='text-align:center;padding:20px;color:#8A8A9A;'>No server data available</td></tr>"
         );
+
+        /* Any collection issues are kept in the data for troubleshooting but
+           are not shown on the report itself -- check the browser console. */
+        if (d.Errors && d.Errors.length > 0 && window.console && console.warn) {
+            console.warn(d.Errors.length + ' issue(s) captured during collection:', d.Errors);
+        }
     }
 
     /* Entry point */
@@ -648,6 +638,7 @@ function Save-Report {
             $OutputFile = Join-Path $OutputDir "RDSLicenseMonitoring_Combined_${cDT}.html"
         }
 
+        # Aggregate totals -- same calculation whether there is 1 row or many
         $TotalInstalled = [int]($Results | Measure-Object Installed -Sum).Sum
         $TotalIssued    = [int]($Results | Measure-Object Issued    -Sum).Sum
         $TotalAvailable = [int]($Results | Measure-Object Available -Sum).Sum
@@ -704,8 +695,8 @@ window.REPORT_DATA = {
 
 #endregion REPORT WRITERS
 
-
 #region MAIN
+
 try {
 
     Write-Log "================================================================="
@@ -760,7 +751,7 @@ try {
             $Pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(
                         1, $ServerList.Count)
             $Pool.ApartmentState = "MTA"
-
+            $Pool.Open()
             $fnBodies = @{
                 WriteLog    = (Get-Command Write-Log).ScriptBlock.ToString()
                 GetComp     = (Get-Command Get-Compliance).ScriptBlock.ToString()
