@@ -308,7 +308,7 @@ function Get-UnifiedTemplate {
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-    <title>RDS License Usage Monitoring | Citrix Workspace Automation Suite</title>
+    <title>RDS License Usage Report </title>
     <style>
         /* ---- Design tokens ------------------------------------------------ */
         :root {
@@ -362,10 +362,6 @@ function Get-UnifiedTemplate {
         .hdr-inner {
             position: relative; z-index: 1; padding: 10px 28px 7px;
             display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-        }
-        .hdr-eyebrow {
-            font-size: .58rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
-            color: rgba(255,255,255,.62); margin-bottom: 2px;
         }
         .hdr-title { font-size: 1.12rem; font-weight: 800; letter-spacing: -.3px; line-height: 1.15; }
         .hdr-gen   { font-size: .62rem; color: rgba(255,255,255,.78); white-space: nowrap; }
@@ -467,7 +463,6 @@ function Get-UnifiedTemplate {
 <div class="rpt-hdr">
     <div class="hdr-inner">
         <div>
-            <div class="hdr-eyebrow" id="hdr-eyebrow">Citrix Workspace Automation Suite</div>
             <div class="hdr-title">RDS License Usage Monitoring</div>
         </div>
         <div class="hdr-gen">&#128336; Generated: <span id="gen-date">-</span></div>
@@ -547,7 +542,6 @@ function Get-UnifiedTemplate {
         var isSingle      = d.ServerCount === 1;
 
         /* Header strip -- one format, server count just changes the numbers */
-        set('hdr-eyebrow', 'Citrix Workspace Automation Suite \u00b7 ' + d.ServerCount + ' Server(s)');
         set('gen-date', d.GenDate);
         setHtml('hdr-strip-left',
             "<span>&#128421; Servers: <strong>" + d.ServerCount + "</strong></span>" +
