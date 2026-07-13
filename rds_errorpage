@@ -1,0 +1,26 @@
+At C:\Windows\TEMP\temp121061190551.ps1:401 char:91
++ ... osts.Count -gt 0) { "Explicit list ($($ResolvedHosts.Count) hosts)" }
++                                                                 ~~~~~
+Unexpected token 'hosts' in expression or statement.
+
+At C:\Windows\TEMP\temp121061190551.ps1:401 char:90
++ ... nHosts.Count -gt 0) { "Explicit list ($($ResolvedHosts.Count) hosts)" ...
++                                                                  ~
+Missing closing ')' in expression.
+
+At C:\Windows\TEMP\temp121061190551.ps1:307 char:33
++ if ($ResolvedHosts.Count -gt 0) {
++                                 ~
+Missing closing '}' in statement block or type definition.
+
+At C:\Windows\TEMP\temp121061190551.ps1:401 char:96
++ ... osts.Count -gt 0) { "Explicit list ($($ResolvedHosts.Count) hosts)" }
++                                                                      ~
+Unexpected token ')' in expression or statement.
+
+At C:\Windows\TEMP\temp121061190551.ps1:402 char:53
++                  elseif ($ADOrgUnit)             { "AD OU: $ADOrgUnit ...
++                                                     ~~
+Unexpected token 'AD' in expression or statement.
+    + CategoryInfo          : ParserError: (:) [], ParseException
+    + FullyQualifiedErrorId : UnexpectedToken
