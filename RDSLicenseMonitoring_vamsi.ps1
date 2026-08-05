@@ -18,7 +18,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.7.1"
+$ScriptVersion        = "V1.8.2"
 #endregion CONFIG
 
 
@@ -703,9 +703,18 @@ window.REPORT_DATA = {
 };
 </script>
 "@
-        $Html.Replace('</body>', $JsonBlock + "`n</body>") |
-            Out-File -FilePath $OutputFile -Encoding UTF8 -ErrorAction Stop
+        $FinalHtml = $Html.Replace('</body>', $JsonBlock + "`n</body>")
+
+        $FinalHtml | Out-File -FilePath $OutputFile -Encoding UTF8 -ErrorAction Stop
         Write-Log "Report saved ($($Results.Count) server(s)): $OutputFile" "SUCCESS"
+
+        # Echo the same HTML to stdout too, in case the saved file path above
+        # isn't reachable to whoever/whatever needs the report -- the markers
+        # let the caller extract just the HTML between them.
+        Write-Log "server name: $($Results.Server -join ', ')" "INFO"
+        Write-Output "===== HTML_REPORT_START : $(Split-Path $OutputFile -Leaf) ====="
+        Write-Output $FinalHtml
+        Write-Output "===== HTML_REPORT_END : $(Split-Path $OutputFile -Leaf) ====="
 
     } catch {
         Write-Log "FATAL: Report could not be saved -- $($_.Exception.Message)" "ERROR"
@@ -734,7 +743,6 @@ try {
     if ($ServerList.Count -eq 0) {
         throw "LicenseServerFQDN is empty or contains no valid server names."
     }
-    Write-Log "server name: $($ServerList -join ', ')" "INFO"
 
     # Ensure output folder exists
     if (-not (Test-Path $OutputDir)) {
