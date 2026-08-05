@@ -18,7 +18,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.7.0"
+$ScriptVersion        = "V1.7.1"
 #endregion CONFIG
 
 
@@ -171,7 +171,6 @@ function Get-OSVersion {
 function Invoke-LicenseServerReport {
     param([Parameter(Mandatory)][string]$Server)
 
-    Write-Log "--- [$Server] Starting ---"
     $ErrorLog = [System.Collections.Generic.List[string]]::new()
 
     # 1. Query key packs
@@ -385,6 +384,13 @@ function Get-UnifiedTemplate {
         /* ---- Body --------------------------------------------------------- */
         .rpt-body { max-width: var(--max-w); margin: 28px auto; padding: 0 26px 56px; }
 
+        /* ---- Footer -- run/scope traceability -------------------------- */
+        .rpt-ftr {
+            margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
+            font-size: .72rem; color: var(--text-m); text-align: center;
+        }
+        .rpt-ftr strong { color: var(--brand-dark); font-weight: 700; }
+
         /* ---- KPI cards (one 4-column layout, used for single or multi server) */
         .card-grid { display: grid; gap: 10px; margin-bottom: 18px; align-items: stretch; grid-template-columns: repeat(4, 1fr); }
         .card {
@@ -501,6 +507,9 @@ function Get-UnifiedTemplate {
         </div>
     </div>
 
+    <!-- Footer -- run/scope traceability, kept inside the saved HTML itself -->
+    <div class="rpt-ftr" id="rpt-ftr">-</div>
+
 </div>
 
 <script>
@@ -578,6 +587,17 @@ function Get-UnifiedTemplate {
             "<tr><td colspan='6' style='text-align:center;padding:20px;color:#8A8A9A;'>No server data available</td></tr>"
         );
 
+        /* Footer -- run/scope traceability, kept inside the saved HTML itself */
+        var reqCount = d.RequestedCount || d.ServerCount;
+        var scopeTxt = (reqCount === d.ServerCount)
+            ? d.ServerCount + ' of ' + reqCount + ' server(s) reporting'
+            : d.ServerCount + ' of ' + reqCount + ' server(s) reporting -- see console log for excluded server(s)';
+        setHtml('rpt-ftr',
+            "RDSLicenseMonitoring.ps1 <strong>" + d.ScriptVersion + "</strong> &nbsp;|&nbsp; " +
+            "Generated <strong>" + d.GenDate + "</strong> &nbsp;|&nbsp; " +
+            "<strong>" + scopeTxt + "</strong>"
+        );
+
         /* Any collection issues are kept in the data for troubleshooting but
            are not shown on the report itself -- check the browser console. */
         if (d.Errors && d.Errors.length > 0 && window.console && console.warn) {
@@ -611,7 +631,11 @@ function Get-UnifiedTemplate {
 function Save-Report {
     param(
         [Parameter(Mandatory)]
-        [System.Collections.Generic.List[object]]$Results
+        [System.Collections.Generic.List[object]]$Results,
+
+        # Total servers originally targeted for this run (including any that
+        # were excluded for having no usable data) -- used only for the footer.
+        [int]$RequestedCount = $Results.Count
     )
 
     if ($Results.Count -eq 0) {
@@ -664,7 +688,9 @@ function Save-Report {
 <script>
 window.REPORT_DATA = {
   "GenDate"          : "$(EscapeJson $GenDate)",
+  "ScriptVersion"    : "$(EscapeJson $ScriptVersion)",
   "ServerCount"      : $($Results.Count),
+  "RequestedCount"   : $RequestedCount,
   "TotalInstalled"   : $TotalInstalled,
   "TotalIssued"      : $TotalIssued,
   "TotalAvailable"   : $TotalAvailable,
@@ -708,7 +734,7 @@ try {
     if ($ServerList.Count -eq 0) {
         throw "LicenseServerFQDN is empty or contains no valid server names."
     }
-    Write-Log "Target server(s) for this run ($($ServerList.Count)): $($ServerList -join ', ')" "INFO"
+    Write-Log "server name: $($ServerList -join ', ')" "INFO"
 
     # Ensure output folder exists
     if (-not (Test-Path $OutputDir)) {
@@ -858,7 +884,7 @@ Invoke-LicenseServerReport -Server $Server
 
     # Save report
     if ($ServerResults.Count -gt 0) {
-        Save-Report -Results $ServerResults
+        Save-Report -Results $ServerResults -RequestedCount $ServerList.Count
     } else {
         Write-Log "No successful results -- no report generated." "WARN"
     }
