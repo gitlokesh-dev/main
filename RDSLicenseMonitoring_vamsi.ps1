@@ -18,7 +18,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V1.8.2"
+$ScriptVersion        = "V1.9.0"
 #endregion CONFIG
 
 
@@ -587,15 +587,9 @@ function Get-UnifiedTemplate {
             "<tr><td colspan='6' style='text-align:center;padding:20px;color:#8A8A9A;'>No server data available</td></tr>"
         );
 
-        /* Footer -- run/scope traceability, kept inside the saved HTML itself */
-        var reqCount = d.RequestedCount || d.ServerCount;
-        var scopeTxt = (reqCount === d.ServerCount)
-            ? d.ServerCount + ' of ' + reqCount + ' server(s) reporting'
-            : d.ServerCount + ' of ' + reqCount + ' server(s) reporting -- see console log for excluded server(s)';
+        /* Footer -- script name + created date only */
         setHtml('rpt-ftr',
-            "RDSLicenseMonitoring.ps1 <strong>" + d.ScriptVersion + "</strong> &nbsp;|&nbsp; " +
-            "Generated <strong>" + d.GenDate + "</strong> &nbsp;|&nbsp; " +
-            "<strong>" + scopeTxt + "</strong>"
+            "RDSLicenseMonitoring.ps1 &nbsp;|&nbsp; Created Date : <strong>" + d.CreatedDate + "</strong>"
         );
 
         /* Any collection issues are kept in the data for troubleshooting but
@@ -647,7 +641,8 @@ function Save-Report {
 
     try {
         $Html    = Get-UnifiedTemplate
-        $GenDate = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+        $GenDate     = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+        $CreatedDate = Get-Date -Format "dd.MM.yyyy"
 
         if ($Results.Count -eq 1) {
             $SafeName   = $Results[0].Server -replace '[^a-zA-Z0-9\-\.]', '_'
@@ -688,6 +683,7 @@ function Save-Report {
 <script>
 window.REPORT_DATA = {
   "GenDate"          : "$(EscapeJson $GenDate)",
+  "CreatedDate"      : "$(EscapeJson $CreatedDate)",
   "ScriptVersion"    : "$(EscapeJson $ScriptVersion)",
   "ServerCount"      : $($Results.Count),
   "RequestedCount"   : $RequestedCount,
