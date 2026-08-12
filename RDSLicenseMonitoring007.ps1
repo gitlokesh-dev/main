@@ -1,4 +1,4 @@
-﻿############################################################################################################
+############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
 ############################################################################################################
@@ -24,7 +24,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V2.6.0"   # V2.6.0: fixed multi-server rows silently showing 0/0/0 with no visible reason -- a server is now excluded from the report (not shown as a misleading zero row) whenever it has 0 installed CALs AND a captured issue (unreachable via WMI/CIM, or the license role returned no key packs at all)
+$ScriptVersion        = "V2.7.0"   # V2.7.0: 'License Summary' section header no longer shows the '- N server(s)' count suffix
 #endregion CONFIG
 
 
@@ -559,10 +559,7 @@ function Save-Report {
         }
 
         # -- Section header label --
-        # Server count is derived directly from the rows actually placed in
-        # the table above (RowsHtmlParts.Count), so it always matches what's
-        # rendered -- no separately-tracked counter to fall out of sync.
-        $SecHdrLabel = "&#128220; License Summary &#8211; $($RowsHtmlParts.Count) server(s)"
+        $SecHdrLabel = "&#128220; License Summary"
 
         # -- Footer --
         $FooterHtml = "RDSLicenseMonitoring.ps1 &nbsp;|&nbsp; Created Date : <strong>$CreatedDate</strong>"
