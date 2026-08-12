@@ -6,10 +6,12 @@
 #region PARAMETERS
 param(
     # One server FQDN, or several separated by semicolons and/or commas
-    # (e.g. "srv1;srv2;srv3" or "srv1,srv2,srv3"). Prefer commas if the
-    # caller (HPSA/Camunda) cannot guarantee the value is passed quoted --
-    # an unquoted semicolon is treated as a PowerShell statement separator
-    # and will silently drop every server after the first one.
+    # (e.g. "srv1;srv2;srv3" or "srv1,srv2,srv3"). RECOMMENDED for HPSA/Camunda:
+    # pass this Base64-encoded instead -- it's auto-detected and decoded, and
+    # completely avoids command-line quoting problems since Base64 text has no
+    # ';', ',', or '"' characters for an unquoted/mis-quoted command build to
+    # mangle. (Same convention already used for credential injection elsewhere
+    # in this suite.)
     [Parameter(Mandatory = $true)]
     [string]$LicenseServerFQDN
 )
@@ -22,7 +24,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V2.4.0"   # V2.4.0: server list now also accepts comma as a separator (survives unquoted HPSA/Camunda command-line construction, unlike ';'), dedupes server names
+$ScriptVersion        = "V2.5.0"   # V2.5.0: auto-detects & decodes a Base64-encoded server list (recommended for HPSA/Camunda injection, dodges command-line quoting issues entirely); still accepts plain ';'/',' separated text
 #endregion CONFIG
 
 
@@ -58,6 +60,35 @@ function HtmlEncode {
     } catch {
         Write-Log "HtmlEncode failed for input value -- returning empty string." "WARN"
         return ""
+    }
+}
+
+# If the incoming value is valid Base64, decode and return the underlying text;
+# otherwise return the original string untouched. This lets HPSA/Camunda inject
+# the server list Base64-encoded (same convention already used for credentials
+# in other scripts in this suite) so that no ';' or '"' ever has to survive an
+# unquoted/mis-quoted command-line build -- Base64 text is just A-Z a-z 0-9 + / =,
+# none of which are special to PowerShell or cmd.exe.
+function Resolve-PossibleBase64 {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    $trimmed = $Value.Trim()
+    # Cheap pre-check: Base64 alphabet only, length a multiple of 4.
+    if ($trimmed -notmatch '^[A-Za-z0-9+/]+={0,2}$' -or ($trimmed.Length % 4) -ne 0) {
+        return $Value
+    }
+    try {
+        $bytes   = [System.Convert]::FromBase64String($trimmed)
+        $decoded = [System.Text.Encoding]::UTF8.GetString($bytes)
+        # A decoded server list should look like plain hostnames/FQDNs separated
+        # by ';' or ',' -- reject anything with control characters, which means
+        # this wasn't actually Base64-encoded text and just happened to match
+        # the alphabet (e.g. a plain single hostname with no separators).
+        if ($decoded -match '[^\x20-\x7E]') { return $Value }
+        Write-Log "  Detected Base64-encoded server list -- decoded." "INFO"
+        return $decoded
+    } catch {
+        return $Value
     }
 }
 
@@ -585,15 +616,20 @@ try {
     Write-Log "================================================================="
 
     # Parse server list
-    # Accepts ';' and/or ',' as separators. Comma is included specifically because
-    # if the caller (HPSA/Camunda) ever builds the command line WITHOUT quoting the
-    # value, an unquoted ';' is treated by PowerShell as a statement separator and
-    # servers after the first one never reach this script at all (they get executed
-    # as bare, unrecognized commands instead). Comma has no such special meaning on
-    # the command line, so "srv1,srv2,srv3" survives even unquoted. Duplicate names
-    # (after trimming/case-folding) are silently collapsed.
+    # Step 1: if HPSA/Camunda injected the value Base64-encoded, decode it first.
+    # This is the recommended path -- it sidesteps command-line quoting entirely,
+    # since Base64 text contains no ';', ',', or '"' for an unquoted/mis-quoted
+    # command build to mangle. Falls through untouched if not actually Base64.
+    $ResolvedServerFQDN = Resolve-PossibleBase64 -Value $LicenseServerFQDN
+
+    # Step 2: split on ';' and/or ',' (both accepted for plain-text input/manual
+    # testing). Comma is included because if the caller ever builds the command
+    # line WITHOUT quoting the value, an unquoted ';' is treated by PowerShell as
+    # a statement separator and servers after the first one never reach this
+    # script at all (they get executed as bare, unrecognized commands instead).
+    # Duplicate names (after trimming) are silently collapsed.
     $ServerList = @(
-        $LicenseServerFQDN -split '[;,]' |
+        $ResolvedServerFQDN -split '[;,]' |
             ForEach-Object { $_.Trim() } |
             Where-Object   { $_ -ne ''  } |
             Select-Object  -Unique
