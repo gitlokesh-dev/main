@@ -5,7 +5,11 @@
 
 #region PARAMETERS
 param(
-    # One server FQDN, or several separated by semicolons (e.g. "srv1;srv2;srv3").
+    # One server FQDN, or several separated by semicolons and/or commas
+    # (e.g. "srv1;srv2;srv3" or "srv1,srv2,srv3"). Prefer commas if the
+    # caller (HPSA/Camunda) cannot guarantee the value is passed quoted --
+    # an unquoted semicolon is treated as a PowerShell statement separator
+    # and will silently drop every server after the first one.
     [Parameter(Mandatory = $true)]
     [string]$LicenseServerFQDN
 )
@@ -18,7 +22,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V2.3.0"   # V2.3.0: removed KPI card row entirely (single & multi-server), section header server count now derived from actual table rows built
+$ScriptVersion        = "V2.4.0"   # V2.4.0: server list now also accepts comma as a separator (survives unquoted HPSA/Camunda command-line construction, unlike ';'), dedupes server names
 #endregion CONFIG
 
 
@@ -581,10 +585,18 @@ try {
     Write-Log "================================================================="
 
     # Parse server list
+    # Accepts ';' and/or ',' as separators. Comma is included specifically because
+    # if the caller (HPSA/Camunda) ever builds the command line WITHOUT quoting the
+    # value, an unquoted ';' is treated by PowerShell as a statement separator and
+    # servers after the first one never reach this script at all (they get executed
+    # as bare, unrecognized commands instead). Comma has no such special meaning on
+    # the command line, so "srv1,srv2,srv3" survives even unquoted. Duplicate names
+    # (after trimming/case-folding) are silently collapsed.
     $ServerList = @(
-        $LicenseServerFQDN -split ';' |
+        $LicenseServerFQDN -split '[;,]' |
             ForEach-Object { $_.Trim() } |
-            Where-Object   { $_ -ne ''  }
+            Where-Object   { $_ -ne ''  } |
+            Select-Object  -Unique
     )
 
     if ($ServerList.Count -eq 0) {
