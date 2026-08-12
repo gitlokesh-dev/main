@@ -1,0 +1,197 @@
+[2026-08-11 13:36:55][INFO] =================================================================
+[2026-08-11 13:36:55][INFO]   RDS License Usage Monitoring | Citrix Workspace Automation Suite
+[2026-08-11 13:36:55][INFO]   V2.2.0  |  Warn=80%  Crit=95%
+[2026-08-11 13:36:55][INFO] =================================================================
+[2026-08-11 13:36:55][INFO] Output folder: C:\Scripts\RDL\Output\
+[2026-08-11 13:36:55][SUCCESS]   WMI OK -- 10 key pack(s)
+[2026-08-11 13:36:55][WARN]   [SKIP-EXPIRED-DATE] A02-5.02-S | Expiry=2022-12-15
+[2026-08-11 13:36:55][WARN]   [SKIP-EXPIRED-DATE] A02-5.02-S | Expiry=2022-12-15
+[2026-08-11 13:36:55][WARN]   [SKIP-EXPIRED-DATE] A02-6.00-S | Expiry=2022-12-15
+[2026-08-11 13:36:55][WARN]   [SKIP-EXPIRED-DATE] A02-6.00-S | Expiry=2022-12-15
+[2026-08-11 13:36:55][WARN]   [SKIP-EXPIRED-DATE] A02-6.00-S | Expiry=2023-04-21
+[2026-08-11 13:36:55][WARN]   [SKIP-EXPIRED-DATE] A02-6.00-S | Expiry=2023-04-21
+[2026-08-11 13:36:55][SUCCESS]   [ACTIVE] A02-10.02-S | Total=6000 | Issued=1556 | Available=4444 | Expiry=2038-01-01
+[2026-08-11 13:36:55][INFO]   Filter: Raw=10 | Unlimited=3 | Expired=6 | Duplicate=0 | Active=1
+[2026-08-11 13:36:55][SUCCESS]   Totals: Installed=6000 | Issued=1556 | Available=4444
+[2026-08-11 13:36:55][INFO]   Result: 1556/6000 (25.9%) => COMPLIANT
+[2026-08-11 13:36:55][INFO] --- [amsdc1-s-7060.europe.shell.com] Complete ---
+[2026-08-11 13:36:55][INFO] =================================================================
+[2026-08-11 13:36:55][SUCCESS] Batch complete: 1 succeeded, 0 failed of 1 total
+[2026-08-11 13:36:55][SUCCESS] Report saved (1 server(s)): C:\Scripts\RDL\Output\RDSLicenseMonitoring_amsdc1-s-7060.europe.shell.com_20260811_133655.html
+[2026-08-11 13:36:55][INFO] server name: amsdc1-s-7060.europe.shell.com
+===== HTML_REPORT_START : RDSLicenseMonitoring_amsdc1-s-7060.europe.shell.com_20260811_133655.html =====
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>RDS License Usage Monitoring | Citrix Workspace Automation Suite</title>
+    <style>
+        /* ---- Design tokens ------------------------------------------------ */
+        :root {
+            --brand        : rgba(216,0,116,1);
+            --brand-dark   : rgba(160,0,85,1);
+            --brand-ultra  : rgba(216,0,116,0.04);
+            --brand-soft   : rgba(216,0,116,0.09);
+            --ok           : #0A7A09;   --ok-bg   : #F0FBF0;   --ok-line   : #CDEFC9;
+            --warn         : #B05E00;   --warn-bg : #FFF8EC;   --warn-line : #F6E2B8;
+            --err          : #BF0E1A;   --err-bg  : #FFF3F4;   --err-line  : #F6C7CB;
+            --text-h       : #15121A;
+            --text-b       : #322B3B;
+            --text-m       : #6B6378;
+            --text-l       : #9A93A6;
+            --line         : #E9E5F0;
+            --surface      : #FFFFFF;
+            --canvas-top   : #F3EEF6;
+            --canvas-bot   : #ECE7F2;
+            --font         : 'Segoe UI','Helvetica Neue',Arial,sans-serif;
+            --font-num     : 'Segoe UI','Helvetica Neue',Arial,sans-serif;
+            --max-w        : 1380px;
+            --r            : 14px;
+            --r-sm         : 10px;
+            --sh           : 0 1px 2px rgba(40,0,25,.04), 0 6px 20px rgba(40,0,25,.06);
+            --sh-lg        : 0 10px 30px rgba(40,0,25,.12);
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font); font-size: 13.5px; color: var(--text-b); line-height: 1.6;
+            background: linear-gradient(165deg, var(--canvas-top) 0%, var(--canvas-bot) 55%, var(--canvas-bot) 100%);
+            min-height: 100vh;
+        }
+
+        /* ---- Header (kept intentionally simple/lightweight) --------------- */
+        .rpt-hdr {
+            background: var(--brand); color: #fff; padding: 10px 28px 8px;
+            display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+        }
+        .hdr-title { font-size: 1.12rem; font-weight: 800; letter-spacing: -.3px; }
+        .hdr-gen   { font-size: .62rem; color: rgba(255,255,255,.78); white-space: nowrap; }
+
+        /* ---- Body --------------------------------------------------------- */
+        .rpt-body { max-width: var(--max-w); margin: 28px auto; padding: 0 26px 56px; }
+
+        /* ---- Footer -- run/scope traceability -------------------------- */
+        .rpt-ftr {
+            margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
+            font-size: .72rem; color: var(--text-m); text-align: center;
+        }
+        .rpt-ftr strong { color: var(--brand-dark); font-weight: 700; }
+
+        /* ---- KPI cards (auto-fits 3 or 4 cards -- no empty slot either way) */
+        .card-grid { display: grid; gap: 10px; margin-bottom: 18px; align-items: stretch; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+        .card {
+            background: var(--surface); border-radius: var(--r-sm); padding: 14px 16px 12px;
+            box-shadow: var(--sh); border-top: 3px solid var(--brand);
+            position: relative; overflow: hidden; min-width: 0;
+            transition: transform .16s ease, box-shadow .16s ease;
+        }
+        .card:hover  { transform: translateY(-3px); box-shadow: var(--sh-lg); }
+        .card::after {
+            content: attr(data-ico); position: absolute; right: 10px; top: 10px;
+            font-size: 1.6rem; opacity: .07;
+        }
+        .card .c-lbl {
+            font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .7px;
+            color: var(--text-l); margin-bottom: 6px; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .card .c-val {
+            font-family: var(--font-num); font-size: 1rem; font-weight: 800;
+            color: var(--text-h); line-height: 1.25; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+        }
+        .card .c-sub {
+            font-size: .66rem; color: var(--text-m); margin-top: 4px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        /* ---- Section / table ---------------------------------------------- */
+        .sec { background: var(--surface); border-radius: var(--r); box-shadow: var(--sh); margin-bottom: 16px; overflow: hidden; border: 1px solid var(--line); }
+        .sec-hdr {
+            display: flex; align-items: center; justify-content: space-between; padding: 14px 22px;
+            background: linear-gradient(120deg, var(--brand) 0%, var(--brand-dark) 100%);
+            color: #fff; cursor: pointer; user-select: none; transition: filter .18s;
+        }
+        .sec-hdr:hover      { filter: brightness(1.06); }
+        .sec-hdr-l          { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: .9rem; }
+        .sec-hdr-r          { display: flex; align-items: center; gap: 8px; font-size: .74rem; opacity: .9; }
+        .chev               { transition: transform .24s; display: inline-block; font-size: .7rem; }
+        .sec-body           { overflow: hidden; }
+        .sec-body.collapsed { display: none; }
+        .tbl-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; }
+        table     { width: 100%; border-collapse: collapse; font-size: .82rem; }
+        thead th  {
+            background: var(--brand-ultra); color: var(--brand-dark); padding: 12px 14px;
+            text-align: left; font-weight: 700; font-size: .71rem; letter-spacing: .3px;
+            text-transform: uppercase; white-space: nowrap; border-bottom: 2px solid var(--brand-soft);
+            position: sticky; top: 0; z-index: 2;
+        }
+        tbody tr            { border-bottom: 1px solid var(--line); transition: background .12s; }
+        tbody tr:last-child { border: none; }
+        tbody tr:hover      { background: var(--brand-ultra); }
+        tbody td            { padding: 12px 14px; vertical-align: middle; }
+        .r-ok  td  { background: var(--ok-bg);   }
+        .r-warn td { background: var(--warn-bg); }
+        .r-err  td { background: var(--err-bg);  }
+        .td-name   { font-weight: 700; color: var(--text-h); }
+
+        /* ---- Progress bar ------------------------------------------------- */
+        .pw { display: flex; align-items: center; gap: 9px; }
+        .pt { flex: 1; height: 9px; background: #ECE7F2; border-radius: 8px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,.06); }
+        .pf { height: 100%; border-radius: 8px; transition: width .7s cubic-bezier(.22,.9,.34,1); }
+        .pp { font-weight: 700; font-size: .76rem; min-width: 38px; text-align: right; }
+    </style>
+    <script>
+        function tog(id) {
+            var b    = document.getElementById('b-' + id);
+            var c    = document.getElementById('chev-' + id);
+            var open = !b.classList.contains('collapsed');
+            if (open) { b.classList.add('collapsed');    c.style.transform = 'rotate(-90deg)'; }
+            else      { b.classList.remove('collapsed'); c.style.transform = 'rotate(0deg)';   }
+        }
+    </script>
+</head>
+<body>
+
+<div class="rpt-hdr">
+    <div class="hdr-title">RDS License Usage Monitoring</div>
+    <div class="hdr-gen">&#128336; Generated: <span id="gen-date">Tuesday, 11 August 2026 13:36:55</span></div>
+</div>
+
+<div class="rpt-body">
+
+    <!-- KPI cards -- same 4-column layout for 1 server or many -->
+    <div class="card-grid" id="card-grid"><div class='card' data-ico='&#128421;'><div class='c-lbl'>License Server</div><div class='c-val'>amsdc1-s-7060.europe.shell.com</div><div class='c-sub'>Microsoft Windows Server 2022 Standard</div></div><div class='card' data-ico='&#128202;'><div class='c-lbl'>Total CALs</div><div class='c-val'>6000</div></div><div class='card' data-ico='&#128273;'><div class='c-lbl'>CALs In Use</div><div class='c-val'>1556</div><div class='c-sub'>25.9% utilisation</div></div><div class='card' data-ico='&#9989;'><div class='c-lbl'>CALs Available</div><div class='c-val'>4444</div></div></div>
+
+    <!-- License summary table -->
+    <div class="sec" id="s-kp">
+        <div class="sec-hdr" onclick="tog('kp')">
+            <span class="sec-hdr-l" id="sec-hdr-label">&#128220; License Summary &#8211; 1 server(s)</span>
+            <span class="sec-hdr-r"><span class="chev" id="chev-kp">&#9660;</span></span>
+        </div>
+        <div class="sec-body" id="b-kp">
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Server Name</th><th>OS Version</th>
+                            <th>Total CALs</th><th>Issued</th><th>Available</th><th>Utilisation</th>
+                        </tr>
+                    </thead>
+                    <tbody id="kp-tbody">
+                        <tr class='r-ok'><td class='td-name'>amsdc1-s-7060.europe.shell.com</td><td>Microsoft Windows Server 2022 Standard</td><td style='text-align:center;font-weight:700;'>6000</td><td style='text-align:center;font-weight:700;color:#0A7A09;'>1556</td><td style='text-align:center;'>4444</td><td><div class='pw'><div class='pt'><div class='pf' style='width:25.9%;background:#0A7A09;'></div></div><div class='pp' style='color:#0A7A09;'>25.9%</div></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -- run/scope traceability, kept inside the saved HTML itself -->
+    <div class="rpt-ftr" id="rpt-ftr">RDSLicenseMonitoring.ps1 &nbsp;|&nbsp; Created Date : <strong>11.08.2026</strong></div>
+
+</div>
+
+</body>
+</html>
+===== HTML_REPORT_END : RDSLicenseMonitoring_amsdc1-s-7060.europe.shell.com_20260811_133655.html =====

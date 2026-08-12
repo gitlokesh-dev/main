@@ -1,0 +1,803 @@
+############################################################################################################
+# Script Name  : RDSLicenseMonitoring.ps1
+# Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
+############################################################################################################
+
+#region PARAMETERS
+param(
+    # One server FQDN, or several separated by semicolons and/or commas
+    # (e.g. "srv1;srv2;srv3" or "srv1,srv2,srv3"). RECOMMENDED for HPSA/Camunda:
+    # pass this Base64-encoded instead -- it's auto-detected and decoded, and
+    # completely avoids command-line quoting problems since Base64 text has no
+    # ';', ',', or '"' characters for an unquoted/mis-quoted command build to
+    # mangle. (Same convention already used for credential injection elsewhere
+    # in this suite.)
+    [Parameter(Mandatory = $true)]
+    [string]$LicenseServerFQDN
+)
+#endregion PARAMETERS
+
+
+#region CONFIG
+$ErrorActionPreference = "Continue"   # script level: HPSA sees all console output
+
+$OutputDir            = "C:\Scripts\RDL\Output\"
+$WarningThresholdPct  = 80
+$CriticalThresholdPct = 95
+$ScriptVersion        = "V2.6.0"   # V2.6.0: fixed multi-server rows silently showing 0/0/0 with no visible reason -- a server is now excluded from the report (not shown as a misleading zero row) whenever it has 0 installed CALs AND a captured issue (unreachable via WMI/CIM, or the license role returned no key packs at all)
+#endregion CONFIG
+
+
+#region HELPERS
+
+# Writes a timestamped, colour-coded line to the console (visible to HPSA).
+function Write-Log {
+    param(
+        [Parameter(Mandatory)][string]$Msg,
+        [ValidateSet("INFO","SUCCESS","WARN","ERROR")][string]$Lvl = "INFO"
+    )
+    try {
+        $col = switch ($Lvl) {
+            "SUCCESS" { "Green"  }
+            "WARN"    { "Yellow" }
+            "ERROR"   { "Red"    }
+            default   { "Cyan"   }
+        }
+        Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')][$Lvl] $Msg" -ForegroundColor $col
+    } catch {
+        # Logging must never break the run -- fall back to a plain, uncoloured line.
+        Write-Host "[$Lvl] $Msg"
+    }
+}
+
+# HTML-encodes a string for safe embedding directly into the rendered report markup
+# (server names, OS versions, error text, etc.).
+function HtmlEncode {
+    param([string]$s)
+    if ([string]::IsNullOrEmpty($s)) { return "" }
+    try {
+        return [System.Net.WebUtility]::HtmlEncode($s)
+    } catch {
+        Write-Log "HtmlEncode failed for input value -- returning empty string." "WARN"
+        return ""
+    }
+}
+
+# If the incoming value is valid Base64, decode and return the underlying text;
+# otherwise return the original string untouched. This lets HPSA/Camunda inject
+# the server list Base64-encoded (same convention already used for credentials
+# in other scripts in this suite) so that no ';' or '"' ever has to survive an
+# unquoted/mis-quoted command-line build -- Base64 text is just A-Z a-z 0-9 + / =,
+# none of which are special to PowerShell or cmd.exe.
+function Resolve-PossibleBase64 {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    $trimmed = $Value.Trim()
+    # Cheap pre-check: Base64 alphabet only, length a multiple of 4.
+    if ($trimmed -notmatch '^[A-Za-z0-9+/]+={0,2}$' -or ($trimmed.Length % 4) -ne 0) {
+        return $Value
+    }
+    try {
+        $bytes   = [System.Convert]::FromBase64String($trimmed)
+        $decoded = [System.Text.Encoding]::UTF8.GetString($bytes)
+        # A decoded server list should look like plain hostnames/FQDNs separated
+        # by ';' or ',' -- reject anything with control characters, which means
+        # this wasn't actually Base64-encoded text and just happened to match
+        # the alphabet (e.g. a plain single hostname with no separators).
+        if ($decoded -match '[^\x20-\x7E]') { return $Value }
+        Write-Log "  Detected Base64-encoded server list -- decoded." "INFO"
+        return $decoded
+    } catch {
+        return $Value
+    }
+}
+
+# Maps a usage percentage to a compliance state using the configured thresholds.
+function Get-Compliance {
+    param([double]$Pct)
+    if ($Pct -ge $CriticalThresholdPct) { return "CRITICAL"  }
+    if ($Pct -ge $WarningThresholdPct)  { return "WARNING"   }
+    return "COMPLIANT"
+}
+
+# Converts a raw WMI datetime string (e.g. license expiry) to UTC, or $null if it never expires.
+function ConvertFrom-WmiExpiry {
+    param([string]$Raw)
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return $null }
+    try {
+        # WMI datetime format: yyyyMMddHHmmss.ffffff+UUU -- only the first 14 chars are needed.
+        $datePart = $Raw.Substring(0, 14)
+        $dt = [datetime]::ParseExact(
+                  $datePart,
+                  'yyyyMMddHHmmss',
+                  [System.Globalization.CultureInfo]::InvariantCulture,
+                  [System.Globalization.DateTimeStyles]::AssumeUniversal)
+        # Year <= 1970 is the WMI "Never expires" sentinel value.
+        if ($dt.Year -le 1970) { return $null }
+        return $dt.ToUniversalTime()
+    } catch {
+        # Unparseable date -- treat as non-expiring to avoid false exclusions.
+        return $null
+    }
+}
+
+#endregion HELPERS
+
+
+#region DATA COLLECTION
+
+function Get-KeyPacks {
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [System.Collections.Generic.List[string]]$ErrorLog
+    )
+
+    # Attempt 1: WMI (fastest path)
+    try {
+        $packs = @(Get-WmiObject -Class "Win32_TSLicenseKeyPack" `
+                       -ComputerName $Server -ErrorAction Stop)
+        Write-Log "  WMI OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        return $packs
+    } catch {
+        Write-Log "  WMI failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+    }
+
+    # Attempt 2: CIM over DCOM (fallback)
+    $cimSess = $null
+    try {
+        $cimOpts = New-CimSessionOption -Protocol Dcom
+        $cimSess = New-CimSession -ComputerName $Server `
+                       -SessionOption $cimOpts -ErrorAction Stop
+        $packs   = @(Get-CimInstance -CimSession $cimSess `
+                         -ClassName "Win32_TSLicenseKeyPack" -ErrorAction Stop)
+        Write-Log "  CIM OK -- $($packs.Count) key pack(s)" "SUCCESS"
+        return $packs
+    } catch {
+        $msg = "[$Server] unreachable via WMI and CIM: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "ERROR"
+        return @()
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+}
+function Get-OSVersion {
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [System.Collections.Generic.List[string]]$ErrorLog
+    )
+
+    # Attempt 1: WMI
+    try {
+        $os = Get-WmiObject -Class "Win32_OperatingSystem" `
+                  -ComputerName $Server -ErrorAction Stop
+        return "$($os.Caption)".Trim()
+    } catch {
+        Write-Log "  WMI OS query failed: $($_.Exception.Message) -- retrying via CIM..." "WARN"
+    }
+
+    # Attempt 2: CIM over DCOM
+    $cimSess = $null
+    try {
+        $cimOpts = New-CimSessionOption -Protocol Dcom
+        $cimSess = New-CimSession -ComputerName $Server `
+                       -SessionOption $cimOpts -ErrorAction Stop
+        $os      = Get-CimInstance -CimSession $cimSess `
+                       -ClassName "Win32_OperatingSystem" -ErrorAction Stop
+        return "$($os.Caption)".Trim()
+    } catch {
+        $msg = "Could not retrieve OS version for [$Server]: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "WARN"
+        return "N/A"
+    } finally {
+        if ($null -ne $cimSess) {
+            try { Remove-CimSession $cimSess -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+}
+function Invoke-LicenseServerReport {
+    param([Parameter(Mandatory)][string]$Server)
+
+    $ErrorLog = [System.Collections.Generic.List[string]]::new()
+
+    # 1. Query key packs
+    $KeyPacks = Get-KeyPacks -Server $Server -ErrorLog $ErrorLog
+
+    if ($KeyPacks.Count -eq 0) {
+        $ErrorLog.Add("[$Server] Zero key packs returned. Verify the RD Licensing role is installed, packs are activated, and the service account has WMI/CIM access.")
+        Write-Log "  Zero key packs returned from [$Server]" "WARN"
+    }
+
+    # 2. Query OS version (runs regardless of key pack success)
+    $OSVersion = Get-OSVersion -Server $Server -ErrorLog $ErrorLog
+
+    # 3. Filter key packs and calculate CAL totals
+    [int64]$Installed      = 0
+    [int64]$Issued         = 0
+    [int64]$Available      = 0
+    $UnlimitedCount        = 0
+    $ExpiredCount          = 0
+    $DuplicateCount        = 0
+    $ActivePacks           = [System.Collections.Generic.List[object]]::new()
+
+    try {
+        $NowUtc         = [datetime]::UtcNow
+        $SeenSignatures = [System.Collections.Generic.HashSet[string]]::new(
+                              [System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($pack in $KeyPacks) {
+
+            # Step 1 -- exclude unlimited / built-in packs
+            $tl = [int64]$pack.TotalLicenses
+            if ($tl -eq -1 -or $tl -eq 4294967295) {
+                $UnlimitedCount++
+                continue
+            }
+
+            # Step 2 -- exclude explicitly expired (KeyPackType = 6)
+            if ([int]$pack.KeyPackType -eq 6) {
+                $ExpiredCount++
+                Write-Log "  [SKIP-EXPIRED-TYPE] $($pack.Description)" "WARN"
+                continue
+            }
+
+            # Step 3 -- exclude expired by ExpirationDate
+            $expiry = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
+            if ($null -ne $expiry -and $expiry -lt $NowUtc) {
+                $ExpiredCount++
+                Write-Log ("  [SKIP-EXPIRED-DATE] {0} | Expiry={1:yyyy-MM-dd}" -f `
+                    $pack.Description, $expiry) "WARN"
+                continue
+            }
+
+            # Step 4 -- deduplicate on Description|Version|Total|Issued
+            $sig = '{0}|{1}|{2}|{3}' -f `
+                $pack.Description, $pack.ProductVersion,
+                $pack.TotalLicenses, $pack.IssuedLicenses
+            if (-not $SeenSignatures.Add($sig)) {
+                $DuplicateCount++
+                Write-Log "  [SKIP-DUPLICATE] $($pack.Description)" "WARN"
+                continue
+            }
+
+            $ActivePacks.Add($pack)
+        }
+
+        # Sum totals from active packs only
+        foreach ($pack in $ActivePacks) {
+            $Installed += [int64]$pack.TotalLicenses
+            $Issued    += [int64]$pack.IssuedLicenses
+            $Available += [int64]$pack.AvailableLicenses
+        }
+
+        # Audit log -- one line per active pack that contributes to totals
+        foreach ($pack in $ActivePacks) {
+            $expStr = if ([string]::IsNullOrWhiteSpace([string]$pack.ExpirationDate)) {
+                          "Never"
+                      } else {
+                          $dt = ConvertFrom-WmiExpiry -Raw ([string]$pack.ExpirationDate)
+                          if ($null -ne $dt) { $dt.ToString("yyyy-MM-dd") } else { "Never" }
+                      }
+            Write-Log ("  [ACTIVE] {0} | Total={1} | Issued={2} | Available={3} | Expiry={4}" -f `
+                $pack.Description,
+                [int64]$pack.TotalLicenses,
+                [int64]$pack.IssuedLicenses,
+                [int64]$pack.AvailableLicenses,
+                $expStr) "SUCCESS"
+        }
+
+        Write-Log ("  Filter: Raw={0} | Unlimited={1} | Expired={2} | Duplicate={3} | Active={4}" -f `
+            $KeyPacks.Count, $UnlimitedCount, $ExpiredCount, $DuplicateCount, $ActivePacks.Count) "INFO"
+        Write-Log ("  Totals: Installed={0} | Issued={1} | Available={2}" -f `
+            $Installed, $Issued, $Available) "SUCCESS"
+
+    } catch {
+        $msg = "CAL calculation error for [$Server]: $($_.Exception.Message)"
+        $ErrorLog.Add($msg)
+        Write-Log "  $msg" "ERROR"
+        $Installed = 0; $Issued = 0; $Available = 0
+    }
+
+    # 4. Compliance
+    $UsagePct   = if ($Installed -gt 0) {
+                      [math]::Round(($Issued / $Installed) * 100, 1)
+                  } else { 0 }
+    $Compliance = Get-Compliance -Pct $UsagePct
+
+    Write-Log ("  Result: {0}/{1} ({2}%) => {3}" -f $Issued, $Installed, $UsagePct, $Compliance)
+    if ($ErrorLog.Count -gt 0) {
+        Write-Log "  $($ErrorLog.Count) issue(s) captured for [$Server]" "WARN"
+    }
+    Write-Log "--- [$Server] Complete ---"
+
+    return [PSCustomObject]@{
+        Server     = $Server
+        OSVersion  = $OSVersion
+        Installed  = [int]$Installed
+        Issued     = [int]$Issued
+        Available  = [int]$Available
+        UsagePct   = $UsagePct
+        Compliance = $Compliance
+        Errors     = $ErrorLog
+    }
+}
+
+#endregion DATA COLLECTION
+
+
+#region HTML TEMPLATE
+
+function Get-UnifiedTemplate {
+    return @'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+    <title>RDS License Usage Monitoring | Citrix Workspace Automation Suite</title>
+    <style>
+        /* ---- Design tokens ------------------------------------------------ */
+        :root {
+            --brand        : rgba(216,0,116,1);
+            --brand-dark   : rgba(160,0,85,1);
+            --brand-ultra  : rgba(216,0,116,0.04);
+            --brand-soft   : rgba(216,0,116,0.09);
+            --ok           : #0A7A09;   --ok-bg   : #F0FBF0;   --ok-line   : #CDEFC9;
+            --warn         : #B05E00;   --warn-bg : #FFF8EC;   --warn-line : #F6E2B8;
+            --err          : #BF0E1A;   --err-bg  : #FFF3F4;   --err-line  : #F6C7CB;
+            --text-h       : #15121A;
+            --text-b       : #322B3B;
+            --text-m       : #6B6378;
+            --text-l       : #9A93A6;
+            --line         : #E9E5F0;
+            --surface      : #FFFFFF;
+            --canvas-top   : #F3EEF6;
+            --canvas-bot   : #ECE7F2;
+            --font         : 'Segoe UI','Helvetica Neue',Arial,sans-serif;
+            --font-num     : 'Segoe UI','Helvetica Neue',Arial,sans-serif;
+            --max-w        : 1380px;
+            --r            : 14px;
+            --r-sm         : 10px;
+            --sh           : 0 1px 2px rgba(40,0,25,.04), 0 6px 20px rgba(40,0,25,.06);
+            --sh-lg        : 0 10px 30px rgba(40,0,25,.12);
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font); font-size: 13.5px; color: var(--text-b); line-height: 1.6;
+            background: linear-gradient(165deg, var(--canvas-top) 0%, var(--canvas-bot) 55%, var(--canvas-bot) 100%);
+            min-height: 100vh;
+        }
+
+        /* ---- Header (kept intentionally simple/lightweight) --------------- */
+        .rpt-hdr {
+            background: var(--brand); color: #fff; padding: 10px 28px 8px;
+            display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+        }
+        .hdr-title { font-size: 1.12rem; font-weight: 800; letter-spacing: -.3px; }
+        .hdr-gen   { font-size: .62rem; color: rgba(255,255,255,.78); white-space: nowrap; }
+
+        /* ---- Body --------------------------------------------------------- */
+        .rpt-body { max-width: var(--max-w); margin: 28px auto; padding: 0 26px 56px; }
+
+        /* ---- Footer -- run/scope traceability -------------------------- */
+        .rpt-ftr {
+            margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
+            font-size: .72rem; color: var(--text-m); text-align: center;
+        }
+        .rpt-ftr strong { color: var(--brand-dark); font-weight: 700; }
+
+        /* ---- Section / table ---------------------------------------------- */
+        .sec { background: var(--surface); border-radius: var(--r); box-shadow: var(--sh); margin-bottom: 16px; overflow: hidden; border: 1px solid var(--line); }
+        .sec-hdr {
+            display: flex; align-items: center; justify-content: space-between; padding: 14px 22px;
+            background: linear-gradient(120deg, var(--brand) 0%, var(--brand-dark) 100%);
+            color: #fff; cursor: pointer; user-select: none; transition: filter .18s;
+        }
+        .sec-hdr:hover      { filter: brightness(1.06); }
+        .sec-hdr-l          { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: .9rem; }
+        .sec-hdr-r          { display: flex; align-items: center; gap: 8px; font-size: .74rem; opacity: .9; }
+        .chev               { transition: transform .24s; display: inline-block; font-size: .7rem; }
+        .sec-body           { overflow: hidden; }
+        .sec-body.collapsed { display: none; }
+        .tbl-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; }
+        table     { width: 100%; border-collapse: collapse; font-size: .82rem; }
+        thead th  {
+            background: var(--brand-ultra); color: var(--brand-dark); padding: 12px 14px;
+            text-align: left; font-weight: 700; font-size: .71rem; letter-spacing: .3px;
+            text-transform: uppercase; white-space: nowrap; border-bottom: 2px solid var(--brand-soft);
+            position: sticky; top: 0; z-index: 2;
+        }
+        tbody tr            { border-bottom: 1px solid var(--line); transition: background .12s; }
+        tbody tr:last-child { border: none; }
+        tbody tr:hover      { background: var(--brand-ultra); }
+        tbody td            { padding: 12px 14px; vertical-align: middle; }
+        .r-ok  td  { background: var(--ok-bg);   }
+        .r-warn td { background: var(--warn-bg); }
+        .r-err  td { background: var(--err-bg);  }
+        .td-name   { font-weight: 700; color: var(--text-h); }
+
+        /* ---- Progress bar ------------------------------------------------- */
+        .pw { display: flex; align-items: center; gap: 9px; }
+        .pt { flex: 1; height: 9px; background: #ECE7F2; border-radius: 8px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,.06); }
+        .pf { height: 100%; border-radius: 8px; transition: width .7s cubic-bezier(.22,.9,.34,1); }
+        .pp { font-weight: 700; font-size: .76rem; min-width: 38px; text-align: right; }
+    </style>
+    <script>
+        function tog(id) {
+            var b    = document.getElementById('b-' + id);
+            var c    = document.getElementById('chev-' + id);
+            var open = !b.classList.contains('collapsed');
+            if (open) { b.classList.add('collapsed');    c.style.transform = 'rotate(-90deg)'; }
+            else      { b.classList.remove('collapsed'); c.style.transform = 'rotate(0deg)';   }
+        }
+    </script>
+</head>
+<body>
+
+<div class="rpt-hdr">
+    <div class="hdr-title">RDS License Usage Monitoring</div>
+    <div class="hdr-gen">&#128336; Generated: <span id="gen-date">{{GEN_DATE}}</span></div>
+</div>
+
+<div class="rpt-body">
+
+    <!-- License summary table -->
+    <div class="sec" id="s-kp">
+        <div class="sec-hdr" onclick="tog('kp')">
+            <span class="sec-hdr-l" id="sec-hdr-label">{{SEC_HDR_LABEL}}</span>
+            <span class="sec-hdr-r"><span class="chev" id="chev-kp">&#9660;</span></span>
+        </div>
+        <div class="sec-body" id="b-kp">
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Server Name</th><th>OS Version</th>
+                            <th>Total CALs</th><th>Issued</th><th>Available</th><th>Utilisation</th>
+                        </tr>
+                    </thead>
+                    <tbody id="kp-tbody">
+                        {{TABLE_ROWS_HTML}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -- run/scope traceability, kept inside the saved HTML itself -->
+    <div class="rpt-ftr" id="rpt-ftr">{{FOOTER_HTML}}</div>
+
+</div>
+
+</body>
+</html>
+'@
+}
+
+#endregion HTML TEMPLATE
+
+
+#region REPORT WRITERS
+
+function Save-Report {
+    param(
+        [Parameter(Mandatory)]
+        [System.Collections.Generic.List[object]]$Results,
+
+        # Total servers originally targeted for this run (including any that
+        # were excluded for having no usable data) -- used only for the footer.
+        [int]$RequestedCount = $Results.Count
+    )
+
+    if ($Results.Count -eq 0) {
+        Write-Log "Save-Report: no results to write -- report skipped." "WARN"
+        return
+    }
+
+    $cDT = Get-Date -Format "yyyyMMdd_HHmmss"
+
+    try {
+        $Html    = Get-UnifiedTemplate
+        $GenDate     = Get-Date -Format "dddd, dd MMMM yyyy HH:mm:ss"
+        $CreatedDate = Get-Date -Format "dd.MM.yyyy"
+
+        if ($Results.Count -eq 1) {
+            $SafeName   = $Results[0].Server -replace '[^a-zA-Z0-9\-\.]', '_'
+            $OutputFile = Join-Path $OutputDir "RDSLicenseMonitoring_${SafeName}_${cDT}.html"
+        } else {
+            $OutputFile = Join-Path $OutputDir "RDSLicenseMonitoring_Combined_${cDT}.html"
+        }
+
+        # Aggregate totals -- same calculation whether there is 1 row or many
+        $TotalInstalled = [int]($Results | Measure-Object Installed -Sum).Sum
+        $TotalIssued    = [int]($Results | Measure-Object Issued    -Sum).Sum
+        $TotalAvailable = [int]($Results | Measure-Object Available -Sum).Sum
+        $OverallPct     = if ($TotalInstalled -gt 0) {
+                              [math]::Round(($TotalIssued / $TotalInstalled) * 100, 1)
+                          } else { 0 }
+        $OverallState   = Get-Compliance -Pct $OverallPct
+
+        # ---- Server-side rendering -------------------------------------
+        # Everything below is built here in PowerShell and dropped straight
+        # into the template's {{PLACEHOLDER}} tokens. There is no client-side
+        # JS/JSON step left -- the saved file (and the stdout copy between
+        # the HPSA markers) is a single, fully self-contained HTML document
+        # the instant it's written, whether it covers 1 server or many.
+        # This is what fixes the "separated output" issue: nothing has to
+        # execute in a browser for the data to be visible.
+
+        # -- Table rows -- one <tr> per server, sorted by usage desc (works for a single row too) --
+        $SortedResults = @($Results | Sort-Object -Property UsagePct -Descending)
+        $RowsHtmlParts = @(foreach ($r in $SortedResults) {
+            $col = if ($r.UsagePct -ge $CriticalThresholdPct) { '#BF0E1A' }
+                   elseif ($r.UsagePct -ge $WarningThresholdPct) { '#B05E00' }
+                   else { '#0A7A09' }
+            $rowCls = if ($r.UsagePct -ge $CriticalThresholdPct) { 'r-err' }
+                      elseif ($r.UsagePct -ge $WarningThresholdPct) { 'r-warn' }
+                      else { 'r-ok' }
+            $progPct  = [math]::Min($r.UsagePct, 100)
+            $progCell = "<div class='pw'><div class='pt'><div class='pf' style='width:${progPct}%;background:${col};'></div></div>" +
+                        "<div class='pp' style='color:${col};'>$($r.UsagePct)%</div></div>"
+
+            "<tr class='$rowCls'>" +
+                "<td class='td-name'>$(HtmlEncode $r.Server)</td>" +
+                "<td>$(HtmlEncode $r.OSVersion)</td>" +
+                "<td style='text-align:center;font-weight:700;'>$($r.Installed)</td>" +
+                "<td style='text-align:center;font-weight:700;color:$col;'>$($r.Issued)</td>" +
+                "<td style='text-align:center;'>$($r.Available)</td>" +
+                "<td>$progCell</td>" +
+            "</tr>"
+        })
+        $TableRowsHtml = if ($RowsHtmlParts.Count -gt 0) {
+            $RowsHtmlParts -join "`n                        "
+        } else {
+            "<tr><td colspan='6' style='text-align:center;padding:20px;color:#8A8A9A;'>No server data available</td></tr>"
+        }
+
+        # -- Section header label --
+        # Server count is derived directly from the rows actually placed in
+        # the table above (RowsHtmlParts.Count), so it always matches what's
+        # rendered -- no separately-tracked counter to fall out of sync.
+        $SecHdrLabel = "&#128220; License Summary &#8211; $($RowsHtmlParts.Count) server(s)"
+
+        # -- Footer --
+        $FooterHtml = "RDSLicenseMonitoring.ps1 &nbsp;|&nbsp; Created Date : <strong>$CreatedDate</strong>"
+
+        # -- Fill the template in a single pass --
+        $FinalHtml = $Html.
+            Replace('{{GEN_DATE}}',        (HtmlEncode $GenDate)).
+            Replace('{{SEC_HDR_LABEL}}',   $SecHdrLabel).
+            Replace('{{TABLE_ROWS_HTML}}', $TableRowsHtml).
+            Replace('{{FOOTER_HTML}}',     $FooterHtml)
+
+        # Collection issues (if any) are kept as an HTML comment for
+        # audit/troubleshooting only -- never shown on the rendered report.
+        $AllErrors = @($Results | ForEach-Object { $_.Errors } | Where-Object { $_ })
+        if ($AllErrors.Count -gt 0) {
+            $ErrComment = "<!-- Collection issues ($($AllErrors.Count)):`n" +
+                          (($AllErrors | ForEach-Object { " - $(HtmlEncode $_)" }) -join "`n") +
+                          "`n-->`n</body>"
+            $FinalHtml = $FinalHtml.Replace('</body>', $ErrComment)
+        }
+
+        $FinalHtml | Out-File -FilePath $OutputFile -Encoding UTF8 -ErrorAction Stop
+        Write-Log "Report saved ($($Results.Count) server(s)): $OutputFile" "SUCCESS"
+
+        # Echo the same HTML to stdout too, in case the saved file path above
+        # isn't reachable to whoever/whatever needs the report -- the markers
+        # let the caller extract just the HTML between them. That HTML is now
+        # fully self-contained (all data rendered server-side), so whatever
+        # captures this stdout block -- 1 server or many -- gets one complete,
+        # correct report with no separate render/merge step needed.
+        Write-Log "server name: $($Results.Server -join ', ')" "INFO"
+        Write-Output "===== HTML_REPORT_START : $(Split-Path $OutputFile -Leaf) ====="
+        Write-Output $FinalHtml
+        Write-Output "===== HTML_REPORT_END : $(Split-Path $OutputFile -Leaf) ====="
+
+    } catch {
+        Write-Log "FATAL: Report could not be saved -- $($_.Exception.Message)" "ERROR"
+        Write-Log "  Stack: $($_.ScriptStackTrace)" "ERROR"
+    }
+}
+
+#endregion REPORT WRITERS
+
+#region MAIN
+
+try {
+
+    Write-Log "================================================================="
+    Write-Log "  RDS License Usage Monitoring | Citrix Workspace Automation Suite"
+    Write-Log "  $ScriptVersion  |  Warn=$WarningThresholdPct%  Crit=$CriticalThresholdPct%"
+    Write-Log "================================================================="
+
+    # Parse server list
+    # Step 1: if HPSA/Camunda injected the value Base64-encoded, decode it first.
+    # This is the recommended path -- it sidesteps command-line quoting entirely,
+    # since Base64 text contains no ';', ',', or '"' for an unquoted/mis-quoted
+    # command build to mangle. Falls through untouched if not actually Base64.
+    $ResolvedServerFQDN = Resolve-PossibleBase64 -Value $LicenseServerFQDN
+
+    # Step 2: split on ';' and/or ',' (both accepted for plain-text input/manual
+    # testing). Comma is included because if the caller ever builds the command
+    # line WITHOUT quoting the value, an unquoted ';' is treated by PowerShell as
+    # a statement separator and servers after the first one never reach this
+    # script at all (they get executed as bare, unrecognized commands instead).
+    # Duplicate names (after trimming) are silently collapsed.
+    $ServerList = @(
+        $ResolvedServerFQDN -split '[;,]' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object   { $_ -ne ''  } |
+            Select-Object  -Unique
+    )
+
+    if ($ServerList.Count -eq 0) {
+        throw "LicenseServerFQDN is empty or contains no valid server names."
+    }
+
+    # Ensure output folder exists
+    if (-not (Test-Path $OutputDir)) {
+        try {
+            New-Item -Path $OutputDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+            Write-Log "Output folder created: $OutputDir" "SUCCESS"
+        } catch {
+            throw "Cannot create output folder '$OutputDir': $($_.Exception.Message)"
+        }
+    } else {
+        Write-Log "Output folder: $OutputDir" "INFO"
+    }
+
+    # Query servers
+    $ServerResults = [System.Collections.Generic.List[object]]::new()
+    $FailedServers = [System.Collections.Generic.List[string]]::new()
+
+    if ($ServerList.Count -eq 1) {
+        # Single server -- direct call, no runspace overhead
+        try {
+            $result = Invoke-LicenseServerReport -Server $ServerList[0]
+            if ($result.Installed -eq 0 -and ($result.OSVersion -eq 'N/A' -or $result.Errors.Count -gt 0)) {
+                # No usable data came back (unreachable / no license role) --
+                # keep this out of the HTML report, not a real "0% compliant" server.
+                $FailedServers.Add($ServerList[0])
+                Write-Log "No usable license data for [$($ServerList[0])] -- excluded from report." "ERROR"
+            } else {
+                $ServerResults.Add($result)
+            }
+        } catch {
+            $FailedServers.Add($ServerList[0])
+            Write-Log "Query failed for [$($ServerList[0])]: $($_.Exception.Message)" "ERROR"
+        }
+
+    } else {
+        # Multiple servers -- parallel RunspacePool (run time = slowest server)
+        Write-Log "Starting parallel queries ($($ServerList.Count) threads)..." "INFO"
+
+        $Pool = $null
+        try {
+            $Pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(
+                        1, $ServerList.Count)
+            $Pool.ApartmentState = "MTA"
+            $Pool.Open()
+            $fnBodies = @{
+                WriteLog    = (Get-Command Write-Log).ScriptBlock.ToString()
+                GetComp     = (Get-Command Get-Compliance).ScriptBlock.ToString()
+                WmiExpiry   = (Get-Command ConvertFrom-WmiExpiry).ScriptBlock.ToString()
+                GetKeyPacks = (Get-Command Get-KeyPacks).ScriptBlock.ToString()
+                GetOsVer    = (Get-Command Get-OSVersion).ScriptBlock.ToString()
+                Invoke      = (Get-Command Invoke-LicenseServerReport).ScriptBlock.ToString()
+            }
+
+            $Jobs = [System.Collections.Generic.List[object]]::new()
+
+            $runspaceScript = @'
+param(
+    [string]$Server,
+    [int]   $Warn,
+    [int]   $Crit,
+    [string]$fnWriteLog,
+    [string]$fnGetComp,
+    [string]$fnWmiExpiry,
+    [string]$fnGetKeyPacks,
+    [string]$fnGetOsVer,
+    [string]$fnInvoke
+)
+# Define functions safely using Set-Item (no string-expansion risk)
+Set-Item -Path function:Write-Log              -Value ([ScriptBlock]::Create($fnWriteLog))
+Set-Item -Path function:Get-Compliance         -Value ([ScriptBlock]::Create($fnGetComp))
+Set-Item -Path function:ConvertFrom-WmiExpiry  -Value ([ScriptBlock]::Create($fnWmiExpiry))
+Set-Item -Path function:Get-KeyPacks           -Value ([ScriptBlock]::Create($fnGetKeyPacks))
+Set-Item -Path function:Get-OSVersion          -Value ([ScriptBlock]::Create($fnGetOsVer))
+Set-Item -Path function:Invoke-LicenseServerReport -Value ([ScriptBlock]::Create($fnInvoke))
+# Threshold variables in local scope (visible to all functions via script scope)
+$WarningThresholdPct  = $Warn
+$CriticalThresholdPct = $Crit
+Invoke-LicenseServerReport -Server $Server
+'@
+
+            foreach ($srv in $ServerList) {
+                $ps = [System.Management.Automation.PowerShell]::Create()
+                $ps.RunspacePool = $Pool
+                # AddScript([string]) + AddArgument() = correct param binding
+                [void]$ps.AddScript($runspaceScript)
+                [void]$ps.AddArgument($srv)
+                [void]$ps.AddArgument($WarningThresholdPct)
+                [void]$ps.AddArgument($CriticalThresholdPct)
+                [void]$ps.AddArgument($fnBodies.WriteLog)
+                [void]$ps.AddArgument($fnBodies.GetComp)
+                [void]$ps.AddArgument($fnBodies.WmiExpiry)
+                [void]$ps.AddArgument($fnBodies.GetKeyPacks)
+                [void]$ps.AddArgument($fnBodies.GetOsVer)
+                [void]$ps.AddArgument($fnBodies.Invoke)
+
+                $handle = $ps.BeginInvoke()
+                $Jobs.Add([PSCustomObject]@{ PS = $ps; Handle = $handle; Server = $srv })
+            }
+
+            # Collect results in submission order
+            foreach ($job in $Jobs) {
+                try {
+                    $result = $job.PS.EndInvoke($job.Handle)
+                    if ($job.PS.HadErrors) {
+                        $job.PS.Streams.Error |
+                            ForEach-Object { Write-Log "  [RunspaceErr][$($job.Server)] $_" "WARN" }
+                    }
+                    if ($null -ne $result -and $result.Count -gt 0) {
+                        $r = $result[0]
+                        if ($r.Installed -eq 0 -and ($r.OSVersion -eq 'N/A' -or $r.Errors.Count -gt 0)) {
+                            # No usable data came back -- exclude from the HTML report.
+                            $FailedServers.Add($job.Server)
+                            Write-Log "No usable license data for [$($job.Server)] -- excluded from report." "ERROR"
+                        } else {
+                            $ServerResults.Add($r)
+                        }
+                    } else {
+                        $FailedServers.Add($job.Server)
+                        Write-Log "No result returned for [$($job.Server)]" "ERROR"
+                    }
+                } catch {
+                    $FailedServers.Add($job.Server)
+                    Write-Log "Job failed [$($job.Server)]: $($_.Exception.Message)" "ERROR"
+                } finally {
+                    try { $job.PS.Dispose() } catch {}
+                }
+            }
+
+        } finally {
+            # Pool always closed even if a job throws
+            if ($null -ne $Pool) {
+                try { $Pool.Close();   } catch {}
+                try { $Pool.Dispose(); } catch {}
+            }
+        }
+
+        Write-Log "Parallel queries complete." "SUCCESS"
+    }
+
+    # Summary
+    Write-Log "================================================================="
+    Write-Log ("Batch complete: {0} succeeded, {1} failed of {2} total" -f `
+        $ServerResults.Count, $FailedServers.Count, $ServerList.Count) "SUCCESS"
+    if ($FailedServers.Count -gt 0) {
+        Write-Log "Failed: $($FailedServers -join ', ')" "ERROR"
+    }
+
+    # Save report
+    if ($ServerResults.Count -gt 0) {
+        Save-Report -Results $ServerResults -RequestedCount $ServerList.Count
+    } else {
+        Write-Log "No successful results -- no report generated." "WARN"
+    }
+
+    # Exit
+    if ($FailedServers.Count -gt 0) { exit 3 } else { exit 0 }
+
+} catch {
+    Write-Log "FATAL: $($_.Exception.Message)" "ERROR"
+    Write-Log "Stack: $($_.ScriptStackTrace)" "ERROR"
+    exit 3
+}
+#endregion MAIN
