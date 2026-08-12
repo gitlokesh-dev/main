@@ -24,7 +24,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V2.5.0"   # V2.5.0: auto-detects & decodes a Base64-encoded server list (recommended for HPSA/Camunda injection, dodges command-line quoting issues entirely); still accepts plain ';'/',' separated text
+$ScriptVersion        = "V2.6.0"   # V2.6.0: fixed multi-server rows silently showing 0/0/0 with no visible reason -- a server is now excluded from the report (not shown as a misleading zero row) whenever it has 0 installed CALs AND a captured issue (unreachable via WMI/CIM, or the license role returned no key packs at all)
 #endregion CONFIG
 
 
@@ -659,7 +659,7 @@ try {
         # Single server -- direct call, no runspace overhead
         try {
             $result = Invoke-LicenseServerReport -Server $ServerList[0]
-            if ($result.OSVersion -eq 'N/A' -and $result.Installed -eq 0) {
+            if ($result.Installed -eq 0 -and ($result.OSVersion -eq 'N/A' -or $result.Errors.Count -gt 0)) {
                 # No usable data came back (unreachable / no license role) --
                 # keep this out of the HTML report, not a real "0% compliant" server.
                 $FailedServers.Add($ServerList[0])
@@ -747,7 +747,7 @@ Invoke-LicenseServerReport -Server $Server
                     }
                     if ($null -ne $result -and $result.Count -gt 0) {
                         $r = $result[0]
-                        if ($r.OSVersion -eq 'N/A' -and $r.Installed -eq 0) {
+                        if ($r.Installed -eq 0 -and ($r.OSVersion -eq 'N/A' -or $r.Errors.Count -gt 0)) {
                             # No usable data came back -- exclude from the HTML report.
                             $FailedServers.Add($job.Server)
                             Write-Log "No usable license data for [$($job.Server)] -- excluded from report." "ERROR"
