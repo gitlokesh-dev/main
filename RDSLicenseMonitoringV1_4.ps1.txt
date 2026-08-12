@@ -1,4 +1,4 @@
-﻿############################################################################################################
+############################################################################################################
 # Script Name  : RDSLicenseMonitoring.ps1
 # Description  : RDS License Usage Monitoring | Citrix Workspace Automation Suite
 ############################################################################################################
@@ -18,7 +18,7 @@ $ErrorActionPreference = "Continue"   # script level: HPSA sees all console outp
 $OutputDir            = "C:\Scripts\RDL\Output\"
 $WarningThresholdPct  = 80
 $CriticalThresholdPct = 95
-$ScriptVersion        = "V2.2.0"   # V2.2.0: auto-fit KPI card grid (no empty slot), drops server-name card for multi-server runs, sticky table header, spacing polish
+$ScriptVersion        = "V2.3.0"   # V2.3.0: removed KPI card row entirely (single & multi-server), section header server count now derived from actual table rows built
 #endregion CONFIG
 
 
@@ -355,34 +355,6 @@ function Get-UnifiedTemplate {
         }
         .rpt-ftr strong { color: var(--brand-dark); font-weight: 700; }
 
-        /* ---- KPI cards (auto-fits 3 or 4 cards -- no empty slot either way) */
-        .card-grid { display: grid; gap: 10px; margin-bottom: 18px; align-items: stretch; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-        .card {
-            background: var(--surface); border-radius: var(--r-sm); padding: 14px 16px 12px;
-            box-shadow: var(--sh); border-top: 3px solid var(--brand);
-            position: relative; overflow: hidden; min-width: 0;
-            transition: transform .16s ease, box-shadow .16s ease;
-        }
-        .card:hover  { transform: translateY(-3px); box-shadow: var(--sh-lg); }
-        .card::after {
-            content: attr(data-ico); position: absolute; right: 10px; top: 10px;
-            font-size: 1.6rem; opacity: .07;
-        }
-        .card .c-lbl {
-            font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .7px;
-            color: var(--text-l); margin-bottom: 6px; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis;
-        }
-        .card .c-val {
-            font-family: var(--font-num); font-size: 1rem; font-weight: 800;
-            color: var(--text-h); line-height: 1.25; white-space: nowrap;
-            overflow: hidden; text-overflow: ellipsis;
-        }
-        .card .c-sub {
-            font-size: .66rem; color: var(--text-m); margin-top: 4px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-
         /* ---- Section / table ---------------------------------------------- */
         .sec { background: var(--surface); border-radius: var(--r); box-shadow: var(--sh); margin-bottom: 16px; overflow: hidden; border: 1px solid var(--line); }
         .sec-hdr {
@@ -437,9 +409,6 @@ function Get-UnifiedTemplate {
 </div>
 
 <div class="rpt-body">
-
-    <!-- KPI cards -- same 4-column layout for 1 server or many -->
-    <div class="card-grid" id="card-grid">{{CARD_GRID_HTML}}</div>
 
     <!-- License summary table -->
     <div class="sec" id="s-kp">
@@ -526,43 +495,6 @@ function Save-Report {
         # This is what fixes the "separated output" issue: nothing has to
         # execute in a browser for the data to be visible.
 
-        $IsSingle = ($Results.Count -eq 1)
-
-        # -- KPI cards --
-        # Single server: name + OS is useful context, so it gets its own card
-        # alongside the 3 aggregate cards (4 cards total).
-        # Multiple servers: a single server-name card would be misleading
-        # (there's no one server to name) and that detail already lives in
-        # the table below, so only the 3 aggregate cards are shown. The
-        # auto-fit grid (see <style>) spreads 3 or 4 cards evenly either way
-        # -- no empty slot.
-        if ($IsSingle) {
-            $CardGridHtml =
-                "<div class='card' data-ico='&#128421;'><div class='c-lbl'>License Server</div>" +
-                    "<div class='c-val'>$(HtmlEncode $Results[0].Server)</div>" +
-                    "<div class='c-sub'>$(HtmlEncode $Results[0].OSVersion)</div></div>" +
-                "<div class='card' data-ico='&#128202;'><div class='c-lbl'>Total CALs</div>" +
-                    "<div class='c-val'>$TotalInstalled</div></div>" +
-                "<div class='card' data-ico='&#128273;'><div class='c-lbl'>CALs In Use</div>" +
-                    "<div class='c-val'>$TotalIssued</div>" +
-                    "<div class='c-sub'>$OverallPct% utilisation</div></div>" +
-                "<div class='card' data-ico='&#9989;'><div class='c-lbl'>CALs Available</div>" +
-                    "<div class='c-val'>$TotalAvailable</div></div>"
-        } else {
-            $CardGridHtml =
-                "<div class='card' data-ico='&#128202;'><div class='c-lbl'>Total CALs</div>" +
-                    "<div class='c-val'>$TotalInstalled</div>" +
-                    "<div class='c-sub'>Across $($Results.Count) servers</div></div>" +
-                "<div class='card' data-ico='&#128273;'><div class='c-lbl'>CALs In Use</div>" +
-                    "<div class='c-val'>$TotalIssued</div>" +
-                    "<div class='c-sub'>$OverallPct% utilisation</div></div>" +
-                "<div class='card' data-ico='&#9989;'><div class='c-lbl'>CALs Available</div>" +
-                    "<div class='c-val'>$TotalAvailable</div></div>"
-        }
-
-        # -- Section header label --
-        $SecHdrLabel = "&#128220; License Summary &#8211; $($Results.Count) server(s)"
-
         # -- Table rows -- one <tr> per server, sorted by usage desc (works for a single row too) --
         $SortedResults = @($Results | Sort-Object -Property UsagePct -Descending)
         $RowsHtmlParts = @(foreach ($r in $SortedResults) {
@@ -591,13 +523,18 @@ function Save-Report {
             "<tr><td colspan='6' style='text-align:center;padding:20px;color:#8A8A9A;'>No server data available</td></tr>"
         }
 
+        # -- Section header label --
+        # Server count is derived directly from the rows actually placed in
+        # the table above (RowsHtmlParts.Count), so it always matches what's
+        # rendered -- no separately-tracked counter to fall out of sync.
+        $SecHdrLabel = "&#128220; License Summary &#8211; $($RowsHtmlParts.Count) server(s)"
+
         # -- Footer --
         $FooterHtml = "RDSLicenseMonitoring.ps1 &nbsp;|&nbsp; Created Date : <strong>$CreatedDate</strong>"
 
         # -- Fill the template in a single pass --
         $FinalHtml = $Html.
             Replace('{{GEN_DATE}}',        (HtmlEncode $GenDate)).
-            Replace('{{CARD_GRID_HTML}}',  $CardGridHtml).
             Replace('{{SEC_HDR_LABEL}}',   $SecHdrLabel).
             Replace('{{TABLE_ROWS_HTML}}', $TableRowsHtml).
             Replace('{{FOOTER_HTML}}',     $FooterHtml)
